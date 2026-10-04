@@ -258,35 +258,60 @@ def _evaluate_fold(
     if tracker is not None:
         tracker.stop()
 
-    # Optionally save model
+    test_metadata = metadata.iloc[test_idx]
+    test_subjects = test_metadata["subject"].to_numpy()
+    if score_subjects is None:
+        score_subjects = list(pd.unique(test_subjects))
+    else:
+        score_subjects = list(score_subjects)
+
+    # Optionally save the fitted fold model under every held-out subject that
+    # still needs this pipeline. GroupKFold may hold out several subjects even
+    # though the estimator is fitted only once for the fold.
     hdf5_path = config["hdf5_path"]
     eval_type = config["eval_type"]
     if hdf5_path is not None and config["save_model"]:
-        model_save_path = _create_save_path(
-            hdf5_path=hdf5_path,
-            code=dataset.code,
-            subject=subject,
-            session="" if score_per_session else session,
-            name=pipeline_name,
-            grid=is_search,
-            eval_type=eval_type,
-        )
-        _save_model_cv(model=cvclf, save_path=model_save_path, cv_index=str(cv_ind))
+        save_subjects = score_subjects if score_per_session else [subject]
+        for save_subject in save_subjects:
+            model_save_path = _create_save_path(
+                hdf5_path=hdf5_path,
+                code=dataset.code,
+                subject=save_subject,
+                session="" if score_per_session else session,
+                name=pipeline_name,
+                grid=is_search,
+                eval_type=eval_type,
+            )
+            _save_model_cv(
+                model=cvclf, save_path=model_save_path, cv_index=str(cv_ind)
+            )
 
     scorer = None if trialwise else _create_scorer(cvclf, scoring)
 
-    # Build score groups: per-session or full test set
+    # Score every held-out subject/session independently. Grouping on session
+    # alone mixes subjects that share labels such as "0" or "1".
     if score_per_session:
-        test_sessions = metadata.iloc[test_idx]["session"].values
-        score_groups = [
-            (test_idx[test_sessions == s], y_test[test_sessions == s], s)
-            for s in np.unique(test_sessions)
-        ]
+        test_sessions = test_metadata["session"].to_numpy()
+        score_groups = []
+        for group_subject in score_subjects:
+            subject_mask = test_subjects == group_subject
+            for group_session in pd.unique(test_sessions[subject_mask]):
+                mask = subject_mask & (test_sessions == group_session)
+                positions = np.flatnonzero(mask)
+                if positions.size:
+                    score_groups.append(
+                        (
+                            test_idx[positions],
+                            y_test[positions],
+                            group_subject,
+                            group_session,
+                        )
+                    )
     else:
-        score_groups = [(test_idx, y_test, session)]
+        score_groups = [(test_idx, y_test, subject, session)]
 
     results = []
-    for group_idx, group_y, group_session in score_groups:
+    for group_idx, group_y, group_subject, group_session in score_groups:
         is_error = False
         try:
             if trialwise:
@@ -302,7 +327,7 @@ def _evaluate_fold(
         res = {
             "time": duration,
             "dataset": dataset,
-            "subject": subject,
+            "subject": group_subject,
             "session": group_session,
             "n_samples": len(train_idx),
             "n_samples_test": len(group_y),
