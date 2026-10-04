@@ -329,7 +329,10 @@ class TestTrialCountMetadataValidation:
         assert "sum(n_trials_per_class)=20" in errors[0]
         assert "sessions_per_subject=2" in errors[0]
 
-    @pytest.mark.parametrize("n_trials", [None, "20 per run", {"train": 20, "test": 10}])
+    @pytest.mark.parametrize(
+        "n_trials",
+        [None, "20 per run", {"train": 20, "test": 10}],
+    )
     def test_irregular_trial_count_representations_are_not_guessed(self, n_trials):
         metadata = self._metadata(
             n_trials=n_trials,
