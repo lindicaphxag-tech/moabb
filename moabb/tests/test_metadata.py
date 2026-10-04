@@ -24,8 +24,8 @@ from moabb.datasets.lee2021_mobile import Lee2021Mobile
 from moabb.datasets.metadata import (
     DATASET_METADATA_CATALOG,
     AcquisitionMetadata,
-    DataStructureMetadata,
     DatasetMetadata,
+    DataStructureMetadata,
     DocumentationMetadata,
     ExperimentMetadata,
     ParticipantMetadata,
@@ -278,15 +278,13 @@ class TestTrialCountMetadataValidation:
     def _metadata(n_trials, n_trials_per_class, sessions_per_subject=2):
         return DatasetMetadata(
             acquisition=AcquisitionMetadata(
-                sampling_rate=250.0,
-                channel_types={"eeg": 8},
+                sampling_rate=250.0, channel_types={"eeg": 8}
             ),
             participants=ParticipantMetadata(n_subjects=1),
             experiment=ExperimentMetadata(paradigm="imagery"),
             sessions_per_subject=sessions_per_subject,
             data_structure=DataStructureMetadata(
-                n_trials=n_trials,
-                n_trials_per_class=n_trials_per_class,
+                n_trials=n_trials, n_trials_per_class=n_trials_per_class
             ),
         )
 
@@ -296,8 +294,7 @@ class TestTrialCountMetadataValidation:
 
     def test_per_subject_total_matches_repeated_session_design(self):
         metadata = self._metadata(
-            n_trials=40,
-            n_trials_per_class={"left_hand": 10, "right_hand": 10},
+            n_trials=40, n_trials_per_class={"left_hand": 10, "right_hand": 10}
         )
 
         errors = validate_metadata_against_dataset(self._dataset(), metadata)
@@ -306,8 +303,7 @@ class TestTrialCountMetadataValidation:
 
     def test_per_session_count_is_reported_explicitly(self):
         metadata = self._metadata(
-            n_trials=20,
-            n_trials_per_class={"left_hand": 10, "right_hand": 10},
+            n_trials=20, n_trials_per_class={"left_hand": 10, "right_hand": 10}
         )
 
         errors = validate_metadata_against_dataset(self._dataset(), metadata)
@@ -318,8 +314,7 @@ class TestTrialCountMetadataValidation:
 
     def test_unambiguous_mismatch_reports_expected_formula(self):
         metadata = self._metadata(
-            n_trials=35,
-            n_trials_per_class={"left_hand": 10, "right_hand": 10},
+            n_trials=35, n_trials_per_class={"left_hand": 10, "right_hand": 10}
         )
 
         errors = validate_metadata_against_dataset(self._dataset(), metadata)
@@ -329,14 +324,10 @@ class TestTrialCountMetadataValidation:
         assert "sum(n_trials_per_class)=20" in errors[0]
         assert "sessions_per_subject=2" in errors[0]
 
-    @pytest.mark.parametrize(
-        "n_trials",
-        [None, "20 per run", {"train": 20, "test": 10}],
-    )
+    @pytest.mark.parametrize("n_trials", [None, "20 per run", {"train": 20, "test": 10}])
     def test_irregular_trial_count_representations_are_not_guessed(self, n_trials):
         metadata = self._metadata(
-            n_trials=n_trials,
-            n_trials_per_class={"left_hand": 10, "right_hand": 10},
+            n_trials=n_trials, n_trials_per_class={"left_hand": 10, "right_hand": 10}
         )
 
         errors = validate_metadata_against_dataset(self._dataset(), metadata)
