@@ -1439,9 +1439,7 @@ class TestParallelProcess:
 
     def test_cross_subject_multisubject_fold_respects_partial_work_plan(self, tmp_path):
         """A cached first subject must not suppress work for another held-out subject."""
-        ds = FakeDataset(
-            ["left_hand", "right_hand"], n_subjects=4, n_sessions=2, seed=42
-        )
+        ds = FakeDataset(["left_hand", "right_hand"], n_subjects=4, n_sessions=2, seed=42)
         evaluation = ev.CrossSubjectEvaluation(
             paradigm=FakeImageryParadigm(),
             datasets=[ds],
