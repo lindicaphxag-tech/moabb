@@ -23,6 +23,12 @@ Version 1.8  (Source - GitHub)
 
 Enhancements
 ~~~~~~~~~~~~
+- Clarify that ``DataStructureMetadata.n_trials`` is the total number of trials
+  per subject across sessions/runs and add a static consistency check against
+  ``n_trials_per_class`` and ``sessions_per_subject`` when all three values are
+  explicit integers. Irregular ``str``/``dict`` trial descriptions remain
+  outside the validator (:gh:`1202` by `lindicaphxag-tech`_).
+
 - Spell MNE's renamed template montages everywhere: MNE 1.13 renamed ``standard_1005``/``standard_1020`` (and the other ``standard_*`` templates) to ``colin27_*`` (identical electrode files), warns on the old names and MNE 1.14 removes them, so every ``make_standard_montage``/``set_montage`` call in MOABB now spells ``colin27_*``. ``METADATA`` montage labels are descriptive and unchanged (:gh:`1200` by `Bruno Aristimunha`_).
 
 API changes
@@ -1063,3 +1069,4 @@ API changes
 .. _Iain: https://github.com/NotAFlightRisk
 .. _Anna Sokolova: https://github.com/ZyntZ
 .. _Arthur031221: https://github.com/Arthur031221
+.. _lindicaphxag-tech: https://github.com/lindicaphxag-tech
