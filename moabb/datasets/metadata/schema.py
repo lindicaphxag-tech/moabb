@@ -791,8 +791,12 @@ def validate_metadata_against_dataset(dataset, metadata: DatasetMetadata) -> Lis
         n_trials = data_structure.n_trials
         n_trials_per_class = data_structure.n_trials_per_class
         sessions = metadata.sessions_per_subject
-        has_scalar_trials = isinstance(n_trials, int) and not isinstance(n_trials, bool)
-        has_session_count = isinstance(sessions, int) and not isinstance(sessions, bool)
+        has_scalar_trials = isinstance(n_trials, int) and not isinstance(
+            n_trials, bool
+        )
+        has_session_count = isinstance(sessions, int) and not isinstance(
+            sessions, bool
+        )
         has_class_counts = (
             isinstance(n_trials_per_class, dict)
             and bool(n_trials_per_class)
@@ -802,7 +806,12 @@ def validate_metadata_against_dataset(dataset, metadata: DatasetMetadata) -> Lis
             )
         )
 
-        if has_scalar_trials and has_session_count and sessions > 0 and has_class_counts:
+        if (
+            has_scalar_trials
+            and has_session_count
+            and sessions > 0
+            and has_class_counts
+        ):
             per_session = sum(n_trials_per_class.values())
             expected = per_session * sessions
             if n_trials != expected:
@@ -815,10 +824,12 @@ def validate_metadata_against_dataset(dataset, metadata: DatasetMetadata) -> Lis
                     )
                 else:
                     errors.append(
-                        f"n_trials mismatch: metadata={n_trials}, expected={expected} from "
+                        f"n_trials mismatch: metadata={n_trials}, expected={expected} "
+                        "from "
                         f"sum(n_trials_per_class)={per_session} * "
                         f"sessions_per_subject={sessions}"
                     )
+
     # Validate country code if present
     if (
         metadata.documentation
