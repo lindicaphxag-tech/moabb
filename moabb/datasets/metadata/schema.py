@@ -285,10 +285,13 @@ class DataStructureMetadata:
     Parameters
     ----------
     n_trials : int | Dict[str, int] | str, optional
-        Total number of trials per subject.
+        Total number of trials per subject across all sessions and runs.
         Can be a single integer, split counts by subset, or a textual summary.
+        Use ``trials_context`` for per-run, per-block, or dataset-wide totals.
     n_trials_per_class : Dict[str, int], optional
-        Number of trials per class.
+        Number of trials per class. When the same class-balanced design repeats
+        across sessions, these counts are interpreted per session so that
+        ``n_trials = sum(n_trials_per_class.values()) * sessions_per_subject``.
     n_blocks : int, optional
         Number of blocks/runs per session.
     block_duration_s : float, optional
@@ -780,6 +783,42 @@ def validate_metadata_against_dataset(dataset, metadata: DatasetMetadata) -> Lis
                 f"dataset={n_subjects}"
             )
 
+    # Validate trial-count semantics when all required fields are explicit.
+    # Irregular designs represented by str/dict/None remain intentionally
+    # outside this static check.
+    data_structure = metadata.data_structure
+    if data_structure is not None:
+        n_trials = data_structure.n_trials
+        n_trials_per_class = data_structure.n_trials_per_class
+        sessions = metadata.sessions_per_subject
+        has_scalar_trials = isinstance(n_trials, int) and not isinstance(n_trials, bool)
+        has_session_count = isinstance(sessions, int) and not isinstance(sessions, bool)
+        has_class_counts = (
+            isinstance(n_trials_per_class, dict)
+            and bool(n_trials_per_class)
+            and all(
+                isinstance(value, int) and not isinstance(value, bool)
+                for value in n_trials_per_class.values()
+            )
+        )
+
+        if has_scalar_trials and has_session_count and sessions > 0 and has_class_counts:
+            per_session = sum(n_trials_per_class.values())
+            expected = per_session * sessions
+            if n_trials != expected:
+                if sessions > 1 and n_trials == per_session:
+                    errors.append(
+                        "n_trials appears to be per-session rather than per-subject: "
+                        f"metadata={n_trials}, expected={expected} from "
+                        f"sum(n_trials_per_class)={per_session} * "
+                        f"sessions_per_subject={sessions}"
+                    )
+                else:
+                    errors.append(
+                        f"n_trials mismatch: metadata={n_trials}, expected={expected} from "
+                        f"sum(n_trials_per_class)={per_session} * "
+                        f"sessions_per_subject={sessions}"
+                    )
     # Validate country code if present
     if (
         metadata.documentation
