@@ -167,6 +167,9 @@ def _evaluate_fold(
         Cross-validation fold index.
     split_metadata : dict | None
         Extra metadata from the splitter.
+    score_subjects : sequence or None
+        Held-out subjects for which this pipeline still needs result rows. If
+        None, all subjects present in the test fold are scored.
 
     Returns
     -------
