@@ -1484,9 +1484,7 @@ class TestParallelProcess:
                 type(self).fit_calls += 1
                 return super().fit(X, y, sample_weight=sample_weight)
 
-        ds = FakeDataset(
-            ["left_hand", "right_hand"], n_subjects=4, n_sessions=2, seed=42
-        )
+        ds = FakeDataset(["left_hand", "right_hand"], n_subjects=4, n_sessions=2, seed=42)
         paradigm = FakeImageryParadigm()
         evaluation = ev.CrossSubjectEvaluation(
             paradigm=paradigm,
@@ -1500,8 +1498,7 @@ class TestParallelProcess:
         X, y, metadata = paradigm.get_data(ds)
         folds = list(evaluation._create_splitter().split(y, metadata))
         held_out_by_fold = [
-            list(pd.unique(metadata.iloc[test_idx]["subject"]))
-            for _, test_idx in folds
+            list(pd.unique(metadata.iloc[test_idx]["subject"])) for _, test_idx in folds
         ]
         assert all(len(subjects) == 2 for subjects in held_out_by_fold)
 
