@@ -139,6 +139,7 @@ def _evaluate_fold(
     cv_ind,
     split_metadata=None,
     calib_idx=None,
+    score_subjects=None,
 ):
     """Evaluate a single CV fold. Pure function, no shared mutable state.
 
@@ -782,14 +783,23 @@ class BaseEvaluation(ABC):
 
         for cv_ind, train_idx, calib_idx, test_idx, split_meta in fold_preview:
             test_meta = metadata.iloc[test_idx]
-            subject = test_meta["subject"].iloc[0]
-
-            if subject not in work_plan:
-                continue
-            run_pipes = work_plan[subject]
+            held_out_subjects = list(pd.unique(test_meta["subject"]))
             session = test_meta["session"].iloc[0]
 
-            for name, clf in run_pipes.items():
+            # A cross-subject GroupKFold test fold can contain several subjects.
+            # Keep one fit task per pipeline, but retain exactly which held-out
+            # subjects still need result rows for that pipeline.
+            for name in pipelines:
+                score_subjects = [
+                    held_out_subject
+                    for held_out_subject in held_out_subjects
+                    if name in work_plan.get(held_out_subject, {})
+                ]
+                if not score_subjects:
+                    continue
+
+                subject = score_subjects[0]
+                clf = work_plan[subject][name]
                 task_config = dict(config)
                 if param_grid is not None and name in param_grid:
                     task_param_grid = {name: deepcopy(param_grid[name])}
@@ -809,6 +819,7 @@ class BaseEvaluation(ABC):
                         "cv_ind": cv_ind,
                         "split_metadata": split_meta,
                         "calib_idx": calib_idx,
+                        "score_subjects": score_subjects,
                     }
                 )
         return tasks
