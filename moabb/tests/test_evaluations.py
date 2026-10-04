@@ -1409,6 +1409,7 @@ class TestParallelProcess:
             n_splits=2,
             overwrite=True,
             hdf5_path=str(tmp_path / "cross_subject_multisubject"),
+            save_model=True,
         )
 
         results = evaluation.process(pipelines)
@@ -1424,6 +1425,56 @@ class TestParallelProcess:
         actual_sizes = results.set_index(["subject", "session"])["samples_test"]
         actual_sizes = actual_sizes.reindex(expected_sizes.index)
         np.testing.assert_array_equal(actual_sizes.to_numpy(), expected_sizes.to_numpy())
+
+        for subject in ds.subject_list:
+            model_dir = (
+                tmp_path
+                / "cross_subject_multisubject"
+                / "Models_CrossSubject"
+                / ds.code
+                / str(subject)
+                / "C"
+            )
+            assert list(model_dir.glob("fitted_model_*.pkl"))
+
+    def test_cross_subject_multisubject_fold_respects_partial_work_plan(self, tmp_path):
+        """A cached first subject must not suppress work for another held-out subject."""
+        ds = FakeDataset(
+            ["left_hand", "right_hand"], n_subjects=4, n_sessions=2, seed=42
+        )
+        evaluation = ev.CrossSubjectEvaluation(
+            paradigm=FakeImageryParadigm(),
+            datasets=[ds],
+            hdf5_path=str(tmp_path / "cross_subject_partial_cache"),
+            n_splits=2,
+        )
+        metadata = pd.DataFrame(
+            {"subject": np.repeat([1, 2, 3, 4], 2), "session": ["0", "1"] * 4}
+        )
+        y = np.array([0, 1] * 4)
+        splitter = evaluation._create_splitter()
+        folds = list(splitter.split(y, metadata))
+        held_out = list(pd.unique(metadata.iloc[folds[0][1]]["subject"]))
+        assert len(held_out) == 2
+
+        target_subject = held_out[1]
+        pipeline = Dummy(strategy="most_frequent")
+        work_plan = {target_subject: {"dummy": pipeline}}
+        tasks = evaluation._build_task_list(
+            ds,
+            None,
+            y,
+            metadata,
+            evaluation._create_splitter(),
+            work_plan,
+            {"dummy": pipeline},
+            None,
+        )
+
+        assert len(tasks) == 1
+        assert tasks[0]["subject"] == target_subject
+        assert tasks[0]["score_subjects"] == [target_subject]
+        assert target_subject in set(metadata.iloc[tasks[0]["test_idx"]]["subject"])
 
     def test_learning_curve_parallel(self, tmp_path):
         """LearningCurve evaluation via parallel process()."""
