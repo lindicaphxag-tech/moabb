@@ -1474,6 +1474,78 @@ class TestParallelProcess:
         assert tasks[0]["score_subjects"] == [target_subject]
         assert target_subject in set(metadata.iloc[tasks[0]["test_idx"]]["subject"])
 
+    def test_cross_subject_partial_cache_fits_remaining_fold_once(self, tmp_path):
+        """A partially cached grouped fold is fitted once for the missing subject."""
+
+        class CountingDummy(Dummy):
+            fit_calls = 0
+
+            def fit(self, X, y, sample_weight=None):
+                type(self).fit_calls += 1
+                return super().fit(X, y, sample_weight=sample_weight)
+
+        ds = FakeDataset(
+            ["left_hand", "right_hand"], n_subjects=4, n_sessions=2, seed=42
+        )
+        paradigm = FakeImageryParadigm()
+        evaluation = ev.CrossSubjectEvaluation(
+            paradigm=paradigm,
+            datasets=[ds],
+            hdf5_path=str(tmp_path / "cross_subject_cached_fold"),
+            n_splits=2,
+        )
+        pipeline = CountingDummy(strategy="most_frequent")
+        pipeline_dict = {"counting": pipeline}
+
+        X, y, metadata = paradigm.get_data(ds)
+        folds = list(evaluation._create_splitter().split(y, metadata))
+        held_out_by_fold = [
+            list(pd.unique(metadata.iloc[test_idx]["subject"]))
+            for _, test_idx in folds
+        ]
+        assert all(len(subjects) == 2 for subjects in held_out_by_fold)
+
+        cached_target = held_out_by_fold[0][0]
+        missing_target = held_out_by_fold[0][1]
+        cached_subjects = [cached_target, *held_out_by_fold[1]]
+
+        process_pipeline = paradigm.make_process_pipelines(ds)[0]
+        for cached_subject in cached_subjects:
+            cached_result = {
+                "score": 0.0,
+                "time": 0.0,
+                "dataset": ds,
+                "subject": cached_subject,
+                "session": "cached",
+                "n_samples": 1,
+                "n_channels": X.shape[1],
+                "carbon_emission": 0.0,
+            }
+            evaluation.results.add(
+                {"counting": cached_result},
+                pipelines=pipeline_dict,
+                process_pipeline=process_pipeline,
+            )
+
+        before = evaluation.results.to_dataframe(
+            pipelines=pipeline_dict, process_pipeline=process_pipeline
+        )
+        before_counts = before.groupby("subject", observed=True).size().to_dict()
+
+        CountingDummy.fit_calls = 0
+        after = evaluation.process(pipeline_dict)
+
+        assert CountingDummy.fit_calls == 1
+        after_counts = after.groupby("subject", observed=True).size().to_dict()
+        increased_subjects = {
+            subject
+            for subject, count in after_counts.items()
+            if count > before_counts.get(subject, 0)
+        }
+        assert increased_subjects == {str(missing_target)}
+        assert after_counts[str(cached_target)] == before_counts[str(cached_target)]
+        assert after_counts[str(missing_target)] == ds.n_sessions
+
     def test_learning_curve_parallel(self, tmp_path):
         """LearningCurve evaluation via parallel process()."""
         evaluation = ev.WithinSessionEvaluation(
