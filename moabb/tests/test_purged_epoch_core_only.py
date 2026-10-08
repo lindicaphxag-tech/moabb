@@ -114,6 +114,40 @@ def test_fails_closed_when_stratification_cannot_support_every_fold():
             np.zeros(10), y, groups=epoch_interval_groups(md)))
 
 
+
+def test_sweep_overlap_equivalent_to_independent_dense_oracle_with_nested_intervals():
+    rng = np.random.default_rng(20261009)
+    for _ in range(100):
+        n_test = int(rng.integers(1, 36))
+        n_train = int(rng.integers(1, 45))
+        # Unsorted/nested/duplicate intervals and zero-boundary contact.
+        starts = rng.integers(-25, 100, size=n_test)
+        ends = starts + rng.integers(1, 45, size=n_test)
+        train = rng.integers(-25, 100, size=n_train)
+        train_end = train + rng.integers(1, 45, size=n_train)
+        oracle = np.any(
+            (train[:, None] < ends[None, :])
+            & (starts[None, :] < train_end[:, None]), axis=1
+        )
+        observed = PurgedEpochKFold._overlap_mask(
+            train, train_end, starts, ends
+        )
+        assert np.array_equal(observed, oracle)
+
+
+def test_large_cohort_does_not_materialize_train_by_test_matrix():
+    n = 30000
+    start = np.arange(n, dtype=np.int64) * 4
+    train_start = start + 1
+    test_start = start
+    # Each [4i+1, 4i+3) overlaps [4i, 4i+2), but not neighbors.
+    actual = PurgedEpochKFold._overlap_mask(
+        train_start, train_start + 2, test_start, test_start + 2
+    )
+    assert actual.shape == (n,)
+    assert actual.dtype == np.dtype(bool)
+    assert actual.all()
+
 def test_explicitly_out_of_scope_continuous_filter_leakage():
     doc = PurgedEpochKFold.__doc__
     assert "does NOT guarantee independence of already-filtered" in doc
