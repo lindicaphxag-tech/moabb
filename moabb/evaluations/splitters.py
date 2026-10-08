@@ -1404,13 +1404,25 @@ class PurgedEpochKFold(GroupsConsumerMixin, BaseCrossValidator):
 
     @staticmethod
     def _overlap_mask(train_start, train_stop, test_start, test_stop):
+        """Exact half-open overlap in O((N+M) log M) time, O(N+M) memory.
+
+        A candidate [a,b) overlaps some test [s,t) iff among tests with
+        s < b, at least one has t > a. Sort test starts once, store prefix
+        maximum stop positions, and binary-search b for each candidate.
+        Unlike N-by-M broadcasting this scales to full EEG epoch cohorts.
+        """
         if len(train_start) == 0 or len(test_start) == 0:
             return np.zeros(len(train_start), dtype=bool)
-        return np.any(
-            (train_start[:, None] < test_stop[None, :])
-            & (test_start[None, :] < train_stop[:, None]),
-            axis=1,
-        )
+        sorted_indices = np.argsort(test_start, kind="stable")
+        sorted_starts = test_start[sorted_indices]
+        prefix_max_stops = np.maximum.accumulate(test_stop[sorted_indices])
+        # side='left': only starts STRICTLY before train_stop may overlap.
+        n_started = np.searchsorted(sorted_starts, train_stop, side="left")
+        mask = n_started > 0
+        mask[mask] = (
+            prefix_max_stops[n_started[mask] - 1] > train_start[mask]
+        )  # stop STRICTLY after train_start: [a,b) and [s,t)
+        return mask
 
     @staticmethod
     def _contiguous_blocks(indices, y, n_splits):
