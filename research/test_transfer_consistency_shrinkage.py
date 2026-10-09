@@ -71,7 +71,7 @@ class TransferConsistencyContract(unittest.TestCase):
 
     def test_reject_insufficient_source_groups(self):
         X,y,g=synthetic_cohort(subjects=3)
-        with self.assertRaisesRegex(ValueError,"at least four"):
+        with self.assertRaisesRegex(ValueError,"At least 3 truly independent source subjects"):
             nested_subject_holdout(X,y,g,outer_subjects=[0])
 
     def test_same_subject_all_epochs_one_vote_for_mean_discriminant(self):
