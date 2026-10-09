@@ -1,0 +1,77 @@
+{
+  "schema": "TRANSFER_CONSISTENCY_EEGBCI_FIRST8_PREOUTCOME_V1",
+  "intent": "First prereg public-EEG source-only nested transfer regularization pilot; publish ALL 8 subjects and all negative results; NOT sufficient for journal generalization",
+  "data": "PhysioNet EEG Motor Movement/Imagery EEGBCI 1.0.0 via MNE",
+  "license": "Follow PhysioNet EEGMMIDB dataset terms and citations",
+  "subjects": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "runs": [
+    4,
+    8,
+    12
+  ],
+  "tasks": "Left (T1) versus right (T2) hand imagery; do not mix hands/feet runs with opposite T1/T2 semantics",
+  "event_labels": {
+    "T1": 0,
+    "T2": 1
+  },
+  "preprocess": {
+    "filter_hz": [
+      8,
+      30
+    ],
+    "tmin_seconds_after_cue": 0.5,
+    "tmax_seconds_after_cue": 2.5,
+    "baseline": "none",
+    "log_welch_bandpower_hz": [
+      [
+        8,
+        12
+      ],
+      [
+        12,
+        20
+      ],
+      [
+        20,
+        30
+      ]
+    ],
+    "standardize_only_on_training_sources": true
+  },
+  "outer_cv": "Leave one ENTIRE subject out; all 8 subjects reported, no excludes",
+  "inner_cv": "Leave one source subject out inside each outer train; no heldout epoch/label in selection",
+  "method": "Cross-subject directional-coherence-dependent spectral shrinkage, signed direction consistency estimated from training labels only",
+  "ridge_grid": [
+    0.03,
+    0.3,
+    3
+  ],
+  "transfer_penalty_grid": [
+    0,
+    1,
+    4
+  ],
+  "comparators": [
+    "same-base ridge with no directional penalty (ablation)",
+    "Ledoit-Wolf auto shrinkage LDA on same log-PSD features",
+    "CSP+regularized LDA on same 8-30Hz EEG epochs (not same feature representation)"
+  ],
+  "primary_metric": "ROC AUC on heldout subject",
+  "independent_unit": "Subject (eight); epoch-level bootstrap prohibited",
+  "statistic": "Report each subject result, paired per-subject deltas, exact signflip exploratory test with all eight; no null superiority claim if p>0.05",
+  "strong_baseline_guard": "If CSP+LDA wins or candidate underperforms, report failure and do not claim SOTA",
+  "no_clinical_or_out_of_dataset_generalization": true,
+  "no_manuscript_claim_before_additional_cohorts": true,
+  "dataset_file_sha256_and_environment_required": true,
+  "no_cherry_picking_subjects": true,
+  "all_failed_subject_downloads_reported": true
+}
