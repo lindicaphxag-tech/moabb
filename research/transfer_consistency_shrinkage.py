@@ -78,7 +78,7 @@ def _subject_equal_spectral_state(X, y, groups) -> SpectralState:
         mean1=Xi[yi==1].mean(axis=0)
         deltas.append(mean1-mean0)
         centered=Xi-np.where(yi[:,None]==0,mean0,mean1)
-        covs.append(centered.T@centered/max(1,len(Xi)-2))
+        covs.append(centered.T@centered/len(Xi))  # invariant to duplicated trials of one source
     sigma=np.mean(np.stack(covs),axis=0)
     vals,vecs=eigh((sigma+sigma.T)/2,check_finite=True)
     vals=np.maximum(vals,0)
