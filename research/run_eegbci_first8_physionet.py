@@ -27,7 +27,7 @@ from research.transfer_consistency_shrinkage import (
 )
 
 PROTO=Path("research/EEGBCI_FIRST8_PREOUTCOME_20261010.json")
-PROTO_HASH="TO_BE_FROZEN"
+PROTO_HASH="f612cb97f8a6de1b4691f94e4794e4d682df1c6e"
 
 
 def load_real_subject(subject:int, runs:list[int], directory:Path):
