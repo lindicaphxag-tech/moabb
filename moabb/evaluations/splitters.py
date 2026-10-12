@@ -1512,24 +1512,36 @@ class PurgedEpochKFold(GroupsConsumerMixin, BaseCrossValidator):
             for end in range(min_end, max_end + 1):
                 start_min = max((n_blocks - 1) * min_size, end - max_size)
                 start_max = min((n_blocks - 1) * max_size, end - min_size)
-                for start in range(start_min, start_max + 1):
-                    prior_cost = costs[n_blocks - 1, start]
-                    if not np.isfinite(prior_cost):
-                        continue
-                    block_size = end - start
-                    block_counts = prefix[end] - prefix[start]
-                    if require_all_classes and np.any(block_counts == 0):
-                        continue
-                    block_proportions = block_counts / block_size
-                    label_cost = np.sum(
-                        (block_proportions - target_proportions) ** 2
-                        / np.maximum(target_proportions, 1 / n_epochs)
-                    )
-                    size_cost = ((block_size - target_size) / target_size) ** 2
-                    candidate = prior_cost + label_cost + 0.1 * size_cost
-                    if candidate < costs[n_blocks, end]:
-                        costs[n_blocks, end] = candidate
-                        previous[n_blocks, end] = start
+                if start_max < start_min:
+                    continue
+                # Vectorize the exact same DP transitions over legal starts.
+                # The old Python scalar loop takes minutes on EEG-sized
+                # cohorts even though only one min-cost predecessor is needed.
+                starts = np.arange(start_min, start_max + 1)
+                prior_costs = costs[n_blocks - 1, starts]
+                admissible = np.isfinite(prior_costs)
+                block_sizes = end - starts
+                block_counts = prefix[end] - prefix[starts]
+                if require_all_classes:
+                    admissible &= np.all(block_counts != 0, axis=1)
+                block_proportions = block_counts / block_sizes[:, None]
+                label_costs = np.sum(
+                    (block_proportions - target_proportions) ** 2
+                    / np.maximum(target_proportions, 1 / n_epochs),
+                    axis=1,
+                )
+                size_costs = ((block_sizes - target_size) / target_size) ** 2
+                candidates = np.where(
+                    admissible,
+                    prior_costs + label_costs + 0.1 * size_costs,
+                    np.inf,
+                )
+                # np.argmin chooses the FIRST minimum, matching the former
+                # ascending-start loop's strict-less-than tie behavior.
+                best = int(np.argmin(candidates))
+                if np.isfinite(candidates[best]):
+                    costs[n_blocks, end] = candidates[best]
+                    previous[n_blocks, end] = starts[best]
 
         if not np.isfinite(costs[n_splits, n_epochs]):
             return np.array_split(indices, n_splits)
