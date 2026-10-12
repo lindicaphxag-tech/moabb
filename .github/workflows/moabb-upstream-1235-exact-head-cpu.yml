@@ -23,12 +23,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 27dd803d3c418682e97c7903bc33a9c71cc8ae3d
+          ref: fc75f39b498b44db5b8663ddaa05d30cb0a51a32
           persist-credentials: false
       - name: Assert exact upstream review patch source
         run: |
           actual="$(git rev-parse HEAD)"
-          expected="27dd803d3c418682e97c7903bc33a9c71cc8ae3d"
+          expected="fc75f39b498b44db5b8663ddaa05d30cb0a51a32"
           echo "Exact upstream PR source: $actual"
           test "$actual" = "$expected"
       - uses: actions/setup-python@v5
