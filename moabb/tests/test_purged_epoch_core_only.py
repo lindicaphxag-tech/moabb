@@ -198,3 +198,44 @@ def test_recording_identity_rejects_missing_subject_session_or_run():
     md["session"] = ["0", None, "0", "0"]
     with pytest.raises(ValueError, match="Recording identity"):
         epoch_interval_groups(md)
+
+
+def test_overlap_mask_matches_brute_force_on_random_half_open_intervals():
+    # Independent oracle for the sweep-line / prefix-max search. This catches
+    # sorting mistakes, exact-endpoint off-by-ones, and nested test windows.
+    rng = np.random.default_rng(20261013)
+    for _ in range(250):
+        n_train = int(rng.integers(0, 32))
+        n_test = int(rng.integers(0, 32))
+        train_start = rng.integers(-100, 101, size=n_train)
+        test_start = rng.integers(-100, 101, size=n_test)
+        train_stop = train_start + rng.integers(1, 51, size=n_train)
+        test_stop = test_start + rng.integers(1, 51, size=n_test)
+        actual = PurgedEpochKFold._overlap_mask(
+            train_start, train_stop, test_start, test_stop
+        )
+        expected = (
+            (train_start[:, None] < test_stop[None, :])
+            & (test_start[None, :] < train_stop[:, None])
+        ).any(axis=1)
+        np.testing.assert_array_equal(actual, expected)
+
+
+def test_overlap_mask_handles_deeply_nested_intervals_and_equal_boundaries():
+    train_start = np.array([-5, 0, 10, 20, 21, 90])
+    train_stop = np.array([0, 10, 20, 21, 90, 100])
+    test_start = np.array([-100, 0, 15, 20, 50, 90])
+    test_stop = np.array([100, 10, 16, 21, 70, 120])
+    expected = np.array([True, True, True, True, True, True])
+    np.testing.assert_array_equal(
+        PurgedEpochKFold._overlap_mask(
+            train_start, train_stop, test_start, test_stop
+        ), expected
+    )
+    # With exactly touching half-open windows, no purge is permitted.
+    np.testing.assert_array_equal(
+        PurgedEpochKFold._overlap_mask(
+            np.array([0, 10, 20]), np.array([10, 20, 30]),
+            np.array([10]), np.array([20])
+        ), np.array([False, True, False])
+    )
