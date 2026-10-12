@@ -153,12 +153,21 @@ def test_explicitly_out_of_scope_continuous_filter_leakage():
     assert "does NOT guarantee independence of already-filtered" in doc
     assert "IIR filter" in doc
 
-def test_recording_identity_keeps_reused_run_names_separate_across_sessions():
-    # MOABB datasets often reuse run='0' for different recordings.
-    # Their event-sample coordinate systems restart independently.
+@pytest.mark.parametrize(
+    ("subjects", "sessions"),
+    [
+        ([1] * 4 + [2] * 4, ["0"] * 8),
+        ([1] * 8, ["0"] * 4 + ["1"] * 4),
+    ],
+)
+def test_recording_identity_keeps_reused_run_names_separate_across_sessions(
+    subjects, sessions
+):
+    # Run names can repeat between subjects or between sessions of one subject.
+    # Recording-specific event-sample coordinate systems restart independently.
     md = pd.DataFrame({
-        "subject": [1] * 4 + [2] * 4,
-        "session": ["0"] * 8,
+        "subject": subjects,
+        "session": sessions,
         "run": ["0"] * 8,
         "event_sample": [0, 100, 200, 300] * 2,
         "epoch_n_samples": [50] * 8,
@@ -173,13 +182,15 @@ def test_recording_identity_keeps_reused_run_names_separate_across_sessions():
         np.zeros(len(md)), groups=groups
     ))
     assert len(folds) == 2
+    recording_md = md.assign(
+        run=[f"{subject}/{session}" for subject, session in zip(subjects, sessions)]
+    )
     for train, test in folds:
-        assert not _has_direct_overlap(train, test, md.assign(
-            run=[f"subject-{s}" for s in md["subject"]]
-        ))
-        for subject in [1, 2]:
-            assert sum(md.iloc[test]["subject"] == subject) == 2
-            assert sum(md.iloc[train]["subject"] == subject) == 2
+        assert not _has_direct_overlap(train, test, recording_md)
+        assert np.count_nonzero(test < 4) == 2
+        assert np.count_nonzero(test >= 4) == 2
+        assert np.count_nonzero(train < 4) == 2
+        assert np.count_nonzero(train >= 4) == 2
 
 
 def test_recording_identity_rejects_missing_subject_session_or_run():
