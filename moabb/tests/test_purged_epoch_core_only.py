@@ -298,3 +298,99 @@ def test_large_ambiguous_float_and_out_of_range_integer_are_rejected():
     groups[1, 1] = 2**65
     with pytest.raises(ValueError, match="int64 range"):
         list(PurgedEpochKFold(2).split(np.zeros(8), groups=groups))
+
+
+def _scalar_class_balanced_dp_oracle(indices, y, n_splits):
+    # Independent, deliberately simple DP reference: compare the EXACT
+    # chronological class-balanced boundaries, not only their block sizes.
+    labels = np.asarray(y)[indices]
+    classes, inverse, counts = np.unique(
+        labels, return_inverse=True, return_counts=True
+    )
+    if len(classes) < 2:
+        return np.array_split(indices, n_splits)
+    n = len(indices)
+    target = n / n_splits
+    smallest = max(1, int(np.floor(target * 0.75)))
+    largest = max(smallest, int(np.ceil(target * 1.25)))
+    largest = max(largest, int(np.ceil(target)))
+    if n < n_splits * smallest or n > n_splits * largest:
+        return np.array_split(indices, n_splits)
+    prefix = np.zeros((n + 1, len(classes)), dtype=np.int64)
+    prefix[1:] = np.cumsum(
+        np.eye(len(classes), dtype=np.int64)[inverse], axis=0
+    )
+    proportions = counts / n
+    must_have_every_class = np.all(counts >= n_splits)
+    costs = np.full((n_splits + 1, n + 1), np.inf)
+    parent = np.full((n_splits + 1, n + 1), -1, dtype=np.int64)
+    costs[0, 0] = 0.0
+    for block in range(1, n_splits + 1):
+        first_end = block * smallest
+        last_end = min(n - (n_splits - block) * smallest, block * largest)
+        for end in range(first_end, last_end + 1):
+            first_start = max((block - 1) * smallest, end - largest)
+            last_start = min((block - 1) * largest, end - smallest)
+            for start in range(first_start, last_start + 1):
+                previous = costs[block - 1, start]
+                if not np.isfinite(previous):
+                    continue
+                size = end - start
+                occurrences = prefix[end] - prefix[start]
+                if must_have_every_class and np.any(occurrences == 0):
+                    continue
+                distribution = occurrences / size
+                label_cost = np.sum(
+                    (distribution - proportions) ** 2
+                    / np.maximum(proportions, 1 / n)
+                )
+                size_cost = ((size - target) / target) ** 2
+                score = previous + label_cost + 0.1 * size_cost
+                if score < costs[block, end]:
+                    costs[block, end] = score
+                    parent[block, end] = start
+    if not np.isfinite(costs[n_splits, n]):
+        return np.array_split(indices, n_splits)
+    boundaries = [n]
+    end = n
+    for block in range(n_splits, 0, -1):
+        end = parent[block, end]
+        boundaries.append(end)
+    boundaries.reverse()
+    return [
+        indices[a:b] for a, b in zip(boundaries[:-1], boundaries[1:])
+    ]
+
+
+def test_vectorized_chronological_dp_matches_scalar_oracle_exactly():
+    rng = np.random.default_rng(20261014)
+    for _ in range(200):
+        n = int(rng.integers(12, 100))
+        n_splits = int(rng.integers(2, min(n, 7)))
+        n_classes = int(rng.integers(2, 6))
+        labels = rng.integers(0, n_classes, n)
+        chronological_indices = rng.permutation(n)
+        observed = PurgedEpochKFold._contiguous_blocks(
+            chronological_indices, labels, n_splits
+        )
+        expected = _scalar_class_balanced_dp_oracle(
+            chronological_indices, labels, n_splits
+        )
+        assert len(observed) == len(expected)
+        for actual_block, reference_block in zip(observed, expected):
+            np.testing.assert_array_equal(actual_block, reference_block)
+
+
+def test_large_label_balanced_cohort_yields_complete_chronological_blocks():
+    # Tests the full DP (not only the fast overlap mask) at realistic EEG size.
+    rng = np.random.default_rng(6300)
+    labels = rng.integers(0, 3, size=3000)
+    chronological = np.arange(3000)
+    blocks = PurgedEpochKFold._contiguous_blocks(
+        chronological, labels, n_splits=5
+    )
+    assert len(blocks) == 5
+    np.testing.assert_array_equal(np.concatenate(blocks), chronological)
+    for block in blocks:
+        assert len(block) > 0
+        assert set(labels[block]) == {0, 1, 2}
