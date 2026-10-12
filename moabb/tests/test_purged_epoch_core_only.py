@@ -239,3 +239,60 @@ def test_overlap_mask_handles_deeply_nested_intervals_and_equal_boundaries():
             np.array([10]), np.array([20])
         ), np.array([False, True, False])
     )
+
+
+def test_int64_sample_coordinate_translation_preserves_exact_purge():
+    # float(2**53 + 1) rounds DOWN by one sample. A splitter promising
+    # exact half-open windows cannot round real int64 coordinates through f64.
+    base = 2**53 + 101
+    offsets = np.arange(12, dtype=np.int64) * 200
+    original = _metadata(offsets, width=220)
+    shifted = _metadata(base + offsets, width=220)
+    x = np.zeros(12)
+    original_groups = epoch_interval_groups(original)
+    shifted_groups = epoch_interval_groups(shifted)
+    _, reconstructed, width = PurgedEpochKFold._parse_groups(
+        shifted_groups, len(shifted)
+    )
+    np.testing.assert_array_equal(reconstructed, base + offsets)
+    np.testing.assert_array_equal(width, np.full(12, 220, dtype=np.int64))
+
+    plain = list(PurgedEpochKFold(3).split(x, groups=original_groups))
+    translated = list(PurgedEpochKFold(3).split(x, groups=shifted_groups))
+    for (train_a, test_a), (train_b, test_b) in zip(plain, translated):
+        np.testing.assert_array_equal(train_a, train_b)
+        np.testing.assert_array_equal(test_a, test_b)
+        assert not _has_direct_overlap(train_b, test_b, shifted)
+
+
+def test_fail_closed_when_epoch_window_stop_overflows_int64():
+    limit = np.iinfo(np.int64).max
+    md = _metadata(
+        np.array([limit - 90, limit - 70, limit - 50, limit - 30],
+                 dtype=np.int64),
+        width=20,
+    )
+    safe = list(PurgedEpochKFold(2).split(
+        np.zeros(4), groups=epoch_interval_groups(md)
+    ))
+    assert len(safe) == 2
+
+    md.loc[3, "epoch_n_samples"] = 40
+    with pytest.raises(ValueError, match="stop exceeds int64"):
+        list(PurgedEpochKFold(2).split(
+            np.zeros(4), groups=epoch_interval_groups(md)
+        ))
+
+
+def test_large_ambiguous_float_and_out_of_range_integer_are_rejected():
+    md = _metadata(np.arange(8, dtype=np.int64) * 100, width=90)
+    groups = epoch_interval_groups(md)
+    # Numeric floats larger than 2**53 cannot carry every sample index;
+    # do not turn such ambiguous floats into authoritative integer metadata.
+    groups[1, 1] = float(2**53 + 2)
+    with pytest.raises(ValueError, match="unambiguous"):
+        list(PurgedEpochKFold(2).split(np.zeros(8), groups=groups))
+    groups = epoch_interval_groups(md)
+    groups[1, 1] = 2**65
+    with pytest.raises(ValueError, match="int64 range"):
+        list(PurgedEpochKFold(2).split(np.zeros(8), groups=groups))
