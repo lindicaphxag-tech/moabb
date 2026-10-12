@@ -1,0 +1,42 @@
+name: MOABB upstream #1235 exact-HEAD raw-epoch purge validation
+
+on:
+  push:
+    branches:
+      - validation/upstream-1235-exact-head-20261013
+    paths:
+      - .github/workflows/moabb-upstream-1235-exact-head-cpu.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-matched-purge:
+    name: Official PR #1235 source / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/erp-purged-within-session-280
+          persist-credentials: false
+      - name: Assert exact upstream review patch source
+        run: |
+          actual="$(git rev-parse HEAD)"
+          expected="d0100fc0cdec7326b0f9b07a2adf70b5016dabeb"
+          echo "Exact upstream PR source: $actual"
+          test "$actual" = "$expected"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e . "pytest>=8,<9.1"
+      - name: Run production source, full PurgedEpochKFold regression subset
+        run: |
+          python -m pytest -q moabb/tests/test_splits.py -k "purged_epoch" --maxfail=1
