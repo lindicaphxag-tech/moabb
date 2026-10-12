@@ -152,3 +152,38 @@ def test_explicitly_out_of_scope_continuous_filter_leakage():
     doc = PurgedEpochKFold.__doc__
     assert "does NOT guarantee independence of already-filtered" in doc
     assert "IIR filter" in doc
+
+def test_recording_identity_keeps_reused_run_names_separate_across_sessions():
+    # MOABB datasets often reuse run='0' for different recordings.
+    # Their event-sample coordinate systems restart independently.
+    md = pd.DataFrame({
+        "subject": [1] * 4 + [2] * 4,
+        "session": ["0"] * 8,
+        "run": ["0"] * 8,
+        "event_sample": [0, 100, 200, 300] * 2,
+        "epoch_n_samples": [50] * 8,
+    })
+    groups = epoch_interval_groups(md)
+    assert groups.shape == (8, 3)
+    assert len(set(groups[:4, 0])) == 1
+    assert len(set(groups[4:, 0])) == 1
+    assert groups[0, 0] != groups[4, 0]
+
+    folds = list(PurgedEpochKFold(n_splits=2).split(
+        np.zeros(len(md)), groups=groups
+    ))
+    assert len(folds) == 2
+    for train, test in folds:
+        assert not _has_direct_overlap(train, test, md.assign(
+            run=[f"subject-{s}" for s in md["subject"]]
+        ))
+        for subject in [1, 2]:
+            assert sum(md.iloc[test]["subject"] == subject) == 2
+            assert sum(md.iloc[train]["subject"] == subject) == 2
+
+
+def test_recording_identity_rejects_missing_subject_session_or_run():
+    md = _metadata([0, 100, 200, 300])
+    md["session"] = ["0", None, "0", "0"]
+    with pytest.raises(ValueError, match="Recording identity"):
+        epoch_interval_groups(md)
