@@ -1321,7 +1321,13 @@ class LearningCurveSplitter(GroupsConsumerMixin, BaseCrossValidator):
 
 
 def epoch_interval_groups(metadata):
-    """Return run-local epoch timing consumed by PurgedEpochKFold."""
+    """Return recording-local epoch timing consumed by PurgedEpochKFold.
+
+    A run label alone is not a globally unique recording identity: different
+    subjects and sessions commonly reuse names such as "0" or "run_1".
+    Encode the available subject/session/run tuple as a stable integer group
+    within the supplied metadata, without changing its source columns.
+    """
     required = ("run", "event_sample", "epoch_n_samples")
     missing = [name for name in required if name not in metadata.columns]
     if missing:
@@ -1329,7 +1335,18 @@ def epoch_interval_groups(metadata):
             "PurgedEpochKFold requires epoch timing metadata columns "
             f"{required}; missing {tuple(missing)}."
         )
-    return metadata.loc[:, required].to_numpy(dtype=object)
+    recording_cols = [
+        col for col in ("subject", "session", "run") if col in metadata.columns
+    ]
+    if metadata.loc[:, recording_cols].isna().any().any():
+        raise ValueError("Recording identity columns must not contain missing values.")
+    recording_codes = {}
+    groups = metadata.loc[:, required].to_numpy(dtype=object)
+    groups[:, 0] = [
+        recording_codes.setdefault(key, len(recording_codes))
+        for key in metadata.loc[:, recording_cols].itertuples(index=False, name=None)
+    ]
+    return groups
 
 
 class PurgedEpochKFold(GroupsConsumerMixin, BaseCrossValidator):
