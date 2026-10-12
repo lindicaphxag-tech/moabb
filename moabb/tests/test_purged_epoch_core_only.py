@@ -289,9 +289,11 @@ def test_large_ambiguous_float_and_out_of_range_integer_are_rejected():
     groups = epoch_interval_groups(md)
     # Numeric floats larger than 2**53 cannot carry every sample index;
     # do not turn such ambiguous floats into authoritative integer metadata.
-    groups[1, 1] = float(2**53 + 2)
-    with pytest.raises(ValueError, match="unambiguous"):
-        list(PurgedEpochKFold(2).split(np.zeros(8), groups=groups))
+    for ambiguous_float in [float(2**53 + 1), float(2**53 + 2)]:
+        groups = epoch_interval_groups(md)
+        groups[1, 1] = ambiguous_float
+        with pytest.raises(ValueError, match="unambiguous"):
+            list(PurgedEpochKFold(2).split(np.zeros(8), groups=groups))
     groups = epoch_interval_groups(md)
     groups[1, 1] = 2**65
     with pytest.raises(ValueError, match="int64 range"):
