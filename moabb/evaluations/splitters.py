@@ -1419,7 +1419,7 @@ class PurgedEpochKFold(GroupsConsumerMixin, BaseCrossValidator):
                     if (
                         not np.isfinite(number)
                         or number != np.floor(number)
-                        or abs(number) > 2**53
+                        or abs(number) >= 2**53
                     ):
                         raise ValueError(
                             "event_sample and epoch_n_samples must be finite integers "
