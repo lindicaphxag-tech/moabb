@@ -1,0 +1,28 @@
+name: Decision-aware EEG source-risk strong-convex certificate checks
+on:
+  push:
+    branches: ["research/decision-aware-eeg-convex-certificate-20261013"]
+    paths:
+      - "research/decision_aware_convex_eeg_certificate.py"
+      - "research/test_decision_aware_convex_eeg_certificate.py"
+      - ".github/workflows/decision-aware-eeg-source-risk-certificate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  independent-convex-certificate:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --disable-pip-version-check numpy scipy pytest
+      - name: Verify exact optimizer residual/convex bound and no certificate false positives
+        run: python -m pytest -q research/test_decision_aware_convex_eeg_certificate.py
