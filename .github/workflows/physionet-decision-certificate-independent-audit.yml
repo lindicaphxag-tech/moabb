@@ -1,0 +1,38 @@
+name: Independent original EDF new-subject decision certificate audit
+on:
+  push:
+    branches: ["research/decision-aware-eeg-convex-certificate-20261013"]
+    paths:
+      - "research/audit_physionet_prospective_decision_certificate.py"
+      - ".github/workflows/physionet-decision-certificate-independent-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  exact-original-edf-certificate-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3"
+      - name: Download frozen full original EEG certificate study outcome
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 38351450509
+          pattern: original-four-new-physionet-decision-cert-evidence
+          merge-multiple: true
+          path: /tmp/original_edf_certificate
+      - name: Independently recompute and check every source bound from artifact
+        run: |
+          python -m research.audit_physionet_prospective_decision_certificate --original /tmp/original_edf_certificate/original_4_new_subject_decision_certificate.json --out independently_audited_real_eeg_certificate.json
+          test -s independently_audited_real_eeg_certificate.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-original-four-new-person-eeg-certificate-audit
+          path: independently_audited_real_eeg_certificate.json
