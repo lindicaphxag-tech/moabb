@@ -1,0 +1,41 @@
+name: Prospective 20 truly new EEGBCI participants frozen decoding sensitivity
+on:
+  push:
+    branches:
+      - "research/physionet-eeg-decoder-20-unseen-20261013"
+    paths:
+      - "research/PHYSIONET_20_NEW_SUBJECTS_DECODER_PREREG_20261013.json"
+      - "research/physionet_20_unseen_subject_decoder.py"
+      - ".github/workflows/physionet-20-unseen-real-eeg.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preregistered-independent-participants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [A, B, C, D]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "scipy>=1.11,<2" "mne>=1.8,<2" "scikit-learn>=1.5,<2"
+      - name: Verify immutable parent source and execute five actual new human EEG IDs
+        env:
+          PYTHONUNBUFFERED: "1"
+          MNE_DONTWRITE_HOME: "true"
+        run: |
+          set -o pipefail
+          python -m research.physionet_20_unseen_subject_decoder --shard ${{ matrix.shard }} --cache /tmp/original_20_new_eegbci_edf --output "unseen_eeg_decoder_${{ matrix.shard }}.json" 2>&1 | tee "unseen_eeg_decoder_${{ matrix.shard }}.log"
+          test -s "unseen_eeg_decoder_${{ matrix.shard }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-unseen-real-EEG-subjects-${{ matrix.shard }}
+          path: |
+            unseen_eeg_decoder_${{ matrix.shard }}.json
+            unseen_eeg_decoder_${{ matrix.shard }}.log
