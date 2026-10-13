@@ -1,0 +1,38 @@
+name: Blind EEG gain certificate full-source 8-person independent audit
+on:
+  push:
+    branches:
+      - research/eeg-gain-shift-cert-unseen-20261013
+    paths:
+      - research/audit_eeg_unseen_gain_cert_8people.py
+      - .github/workflows/eeg-unseen-gain-certificate-audit.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  original-cohort-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check numpy
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 38355519800
+          pattern: original-eeg-gain-certified-*
+          merge-multiple: true
+          path: /tmp/eeg_original_eight_new_people
+      - name: No-drop full eight-person original-EDF decision audit
+        run: |
+          python -m research.audit_eeg_unseen_gain_cert_8people --original-dir /tmp/eeg_original_eight_new_people --out independently_recomputed_8people_gain_cert.json
+          test -s independently_recomputed_8people_gain_cert.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: independently-recomputed-all-eight-original-eeg-gain-cert
+          path: independently_recomputed_8people_gain_cert.json
