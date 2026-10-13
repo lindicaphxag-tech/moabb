@@ -25,7 +25,7 @@ jobs:
       - name: Install isolated numerical audit dependencies
         run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "scipy>=1.11,<2" "pytest>=8,<10"
       - name: Run real SOS filter and counterfactual tests
-        run: python -m pytest -q research/test_filter_fold_dependency_witness.py research/test_filter_aware_guard_budget.py
+        run: python -m pytest -q research/test_filter_fold_dependency_witness.py research/test_filter_aware_guard_budget.py research/test_filter_tight_singular_guard.py
       - name: Execute entire frozen 32-seed by 4-guard design
         run: python -m research.filter_fold_dependency_witness --output filter_fold_dependency_witness.json
       - uses: actions/upload-artifact@v4
