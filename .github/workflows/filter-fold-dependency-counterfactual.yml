@@ -1,0 +1,35 @@
+name: Controlled EEG fold-filter counterfactual audit
+
+on:
+  push:
+    branches:
+      - "research/filter-first-dependence-witness-20261013"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  controlled-iir-audit:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install isolated numerical audit dependencies
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "scipy>=1.11,<2" "pytest>=8,<10"
+      - name: Run real SOS filter and counterfactual tests
+        run: python -m pytest -q research/test_filter_fold_dependency_witness.py
+      - name: Execute entire frozen 32-seed by 4-guard design
+        run: python -m research.filter_fold_dependency_witness --output filter_fold_dependency_witness.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iir-witness-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: filter_fold_dependency_witness.json
