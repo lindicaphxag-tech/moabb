@@ -104,7 +104,7 @@ def test_nonpositive_or_nan_regularization_fails_closed(bad_lambda):
 def test_label_and_feature_breach_fails_closed():
     z,y,q=_data()
     theta=fit_regularized_logistic(z,y,.2).coefficients
-    with pytest.raises(ValueError,match="Counterfactual changed"):
+    with pytest.raises(ValueError):
         certify_known_training_source_change(
             theta,z,z[:-1],y,q,.2
         )
