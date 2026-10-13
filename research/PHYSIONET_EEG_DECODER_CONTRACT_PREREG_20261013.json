@@ -1,0 +1,68 @@
+{
+  "schema": "physionet_eegbci_temporal_event_cv_counterfactual_classifier_v1",
+  "frozen_at": "2026-10-13",
+  "status": "FROZEN_BEFORE_CLASSIFIER_OUTCOME",
+  "parent_source_study": "original 8 EDF real-source study run 38336887369 and independent audit 38337809594",
+  "source": "PhysioNet EEGBCI 1.0.0 original EDFs",
+  "participant_ids": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "run_ids": [
+    4,
+    8
+  ],
+  "raw_sfreq_hz": 160,
+  "labels": {
+    "T1": 0,
+    "T2": 1
+  },
+  "channels": [
+    "C3",
+    "C4"
+  ],
+  "epoch_after_event_seconds": [
+    0.5,
+    2.5
+  ],
+  "chronological_holdout_fraction": "last ceil(N/3) event epochs per run, first N-ceil(N/3) as train, ties follow sorted sample index",
+  "event_epoch_overlap_policy": "fail if any chronological train/test event crop overlaps in raw samples; no purging changed posthoc",
+  "preprocessing": "fixed SciPy sosfiltfilt Butterworth order 4, 1–30 Hz, entire original EDF recording independently for each run",
+  "synthetic_intervention": "flip signs of ORIGINAL raw C3/C4 samples within the union of all heldout test-event epoch crops, before whole-run filtering. This is counterfactual source contamination, not natural leakage or label corruption.",
+  "feature": "8–12 Hz and 13–30 Hz Hann-windowed FFT mean squared amplitudes per C3/C4 channel, log clip floor 1e-20, four features per epoch",
+  "classifier": "sklearn StandardScaler plus LogisticRegression(C=1,solver=lbfgs,max_iter=500,tol=1e-8,random_state=0)",
+  "counterfactual_design": "train same actual train event labels/epochs with features filtered on clean vs test-crop-flipped WHOLE raw run; always evaluate on ORIGINAL clean heldout test features. Do not retrain/tune threshold or use any test labels outside evaluation.",
+  "negative_controls": [
+    "When the heldout crop is masked identically from both clean/perturbed source before filter, train epoch features must be bit-identical",
+    "Between separate EDF R04 and R08, heldout run perturbation cannot affect independently filtered training file"
+  ],
+  "primary_endpoints": [
+    "paired original heldout event predicted-probability absolute change mean/max",
+    "paired original heldout label predicted-class flips",
+    "paired unchanged-test accuracy clean versus source-perturbed training as diagnostic ONLY",
+    "training 4D log-bandpower feature L2 difference",
+    "number of source train epochs with nonzero learned-input drift"
+  ],
+  "statistical_unit": "4 independent people, with 2 runs and multiple event trials repeated, not 8 independent subjects",
+  "registered_cells": "8 within-record chronological train/test fold contrasts, 4 participants with 2 EDF recordings each",
+  "important_boundary": "Underlying training event epochs never overlap selected test event epochs in raw samples. Within-record entire-run zero-phase filtering can still carry test-source dependence. Across-run processing is independent by construction.",
+  "stop_rules": [
+    "fail if any subject/run missing labels T1/T2 or either split lacks both classes",
+    "fail if any training/test event crop directly overlaps or outside EDF",
+    "fail if original train split differs between clean and perturbed versions",
+    "fail if original clean evaluation heldout trial features changed",
+    "fail if intermediate solver fails or JSON nonfinite",
+    "do not remove runs with zero diagnostic effect or no accuracy change"
+  ],
+  "non_claims": [
+    "This does NOT demonstrate label leakage",
+    "This is not a clinical or independent-hospital EEG study",
+    "Nonzero signal influence may not change classification",
+    "No claim that numerical guard improves actual task accuracy",
+    "Not 8 independent participants",
+    "No after-outcome choice of epochs/model/bands",
+    "No upstream MOABB API merge implies from this test"
+  ]
+}
