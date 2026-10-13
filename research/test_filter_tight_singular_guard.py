@@ -12,7 +12,7 @@ def _filter():
     return butter(4,[1,30],btype="bandpass",fs=250,output="sos")
 
 
-def test_stronger_induced_gain_preserves_160_more_raw_training_samples():
+def test_stronger_induced_gain_requires_160_fewer_guard_samples():
     tight,loose,rows=compare_tight_filter_guard(
         _filter(),record_samples=4096,test_interval=(1800,2120),
         training_epoch_samples=320,
