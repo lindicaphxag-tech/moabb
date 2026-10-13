@@ -1,0 +1,69 @@
+{
+  "schema": "EEG_CLIP_DECISION_CERT_UNSEEN_TRAIN_SENSOR_GAIN_V1",
+  "registered_date": "2026-10-13",
+  "status": "FROZEN_BEFORE_NEW_SUBJECT_DATA_AND_COVERAGE_RESULTS",
+  "data_source": "PhysioNet EEGBCI eegmmidb v1.0.0 original EDF",
+  "subjects": [
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36
+  ],
+  "runs": [
+    4,
+    8
+  ],
+  "independent_subject_n": 8,
+  "expected_recordings": 16,
+  "expected_test_events": 80,
+  "channels": [
+    "C3",
+    "C4"
+  ],
+  "labels": [
+    "T1",
+    "T2"
+  ],
+  "chronological_split": "Within each real EDF, sorted original T1/T2 epochs: earliest n-ceil(n/3) train, last ceil(n/3) clean heldout. Extract 0.5-2.5s windows relative to event, no train/test raw overlap.",
+  "counterfactual": "In original RAW recordings, multiply C3 only inside all training event raw windows by 1+alpha (alpha=0.05,0.20,0.50). No test raw sample changed. Refilter entire recording separately, construct changed train log-bandpowers. Evaluate on identical ORIGINAL clean heldout features; this is a synthetic train sensor gain intervention, not a spontaneously observed real artifact or train/test label leakage.",
+  "training_sensor_gain_alpha": [
+    0.05,
+    0.2,
+    0.5
+  ],
+  "fixed_preprocessing": "SciPy sosfiltfilt whole recording, Butterworth 4th order 1-30Hz at 160Hz; C3/C4, log mean square Hann rFFT power in 8-12 and 13-30Hz band per channel; 4 features. Original train-only standardization fixed for BOTH clean and perturbed models.",
+  "fixed_model": "L2-penalized binary logistic loss plus lambda/2 ||theta||^2 with explicit regularized intercept in augmented 5D features; lambda=0.5 and fixed optimization residual <=1e-7.",
+  "certificate_baselines": [
+    "lambda_only_global_strong_convexity",
+    "globally_valid_Hessian_curvature_refinement_6_iterations"
+  ],
+  "registered_mechanism_provenance": {
+    "event_feature_source_git_blob": "67977ba9a58cdcd13f58b801a15c920874609f7b",
+    "global_lambda_bound_source_git_blob": "a964cc41307b0bb0ef413982d9fe3d179b045868",
+    "Hessian_tightening_source_git_blob": "e973cb1a1d9dfcbd4a81cf009c58be2d81d4338d"
+  },
+  "primary_outcome": "person-level mean across two runs and three fixed gains of (Hessian tight certificate coverage - lambda-only certificate coverage) over identical clean heldout trials; outcomes from eight independent persons, not 48 independent EDF-gain datasets.",
+  "secondary_outcomes": [
+    "any refit class flip by scale",
+    "uncertified/abstention rate under both bounds",
+    "false certificate claim count (required zero, else methodology failure)",
+    "mean/max parameter-bound tightening",
+    "per subject and scale exact source EDF SHA256",
+    "subject-level descriptive 95% bootstrap with 2000 resamples fixed seed 20261013"
+  ],
+  "positive_go_no_go": "At least 5 percentage points improvement in person-averaged tight certificate coverage, zero false certified flip and at least two independent people have a nonzero positive gain. This is a project go/no-go threshold, not a pre-specified statistical hypothesis of population significance.",
+  "negative_controls": [
+    "gain=0 exact data should not generate source-change effects (tested in unit tests); full change exactly to registered C3 training raw windows; all original raw test windows and original labels untouched; no per-scale retuning"
+  ],
+  "failure_rules": [
+    "abort if any subject/run/source checksum missing, training event overlap, two-class labels absent or train/test denominator incorrect",
+    "abort on any optimizer residual >1e-7, certificate false positive, altered clean test sources or floating nonfinite",
+    "do not drop zero-effect participants, runs or gain levels"
+  ],
+  "prior_art_and_claim_boundary": "Strong convexity and curvature Hessian bounds are standard, and JMLR 2026 AGT already addresses broader training-data perturbation certificates. Successful numerical coverage would not establish novelty, formal float interval proof, clinical diagnosis improvement, or advantage over AGT; only matched lambda-only bound and honest new-person performance are evaluated here.",
+  "external_recognition": "Official MOABB API merge, independent institution replication and scholarly review are not established by a passing fork Actions job."
+}
