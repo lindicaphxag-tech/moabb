@@ -1,0 +1,27 @@
+name: Data-curvature tight EEG decision certificate independent adversarial tests
+on:
+  push:
+    branches: ["research/decision-aware-eeg-convex-certificate-20261013"]
+    paths:
+      - "research/decision_aware_eeg_curvature_refinement.py"
+      - "research/test_decision_aware_eeg_curvature_refinement.py"
+      - ".github/workflows/decision-aware-eeg-curvature-tight.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tight-certificate-refit-oracle:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check numpy scipy pytest
+      - name: Compare lambda-only bound and tightened global curvature bound with independent refits
+        run: python -m pytest -q research/test_decision_aware_eeg_curvature_refinement.py research/test_decision_aware_convex_eeg_certificate.py
