@@ -1,0 +1,81 @@
+{
+  "schema": "physionet_eegbci_real_edf_crossfold_filter_perturbation_v1",
+  "frozen_date": "2026-10-13",
+  "status": "FROZEN_BEFORE_DATA_OUTCOMES",
+  "source": "PhysioNet EEG Motor Movement/Imagery Dataset (eegmmidb/1.0.0)",
+  "doi": "10.13026/C28G6P",
+  "source_root": "https://physionet.org/files/eegmmidb/1.0.0/",
+  "subjects": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "runs": [
+    4,
+    8
+  ],
+  "task": "hand motor imagery recordings; no classification accuracy endpoint",
+  "channels": [
+    "C3",
+    "C4"
+  ],
+  "source_reading": "mne.io.read_raw_edf(preload=True), mne.datasets.eegbci.standardize before channel selection; no artifact rejection or epoch selection",
+  "raw_sampling_rate_hz": 160,
+  "filter_spec": {
+    "implementation": "scipy.signal.butter(4,[1.0,30.0],btype='bandpass',fs=160,output='sos') followed by sosfiltfilt on complete recording",
+    "order": 4,
+    "passband_hz": [
+      1,
+      30
+    ],
+    "phase": "zero"
+  },
+  "heldout_source_interval_samples": [
+    9600,
+    9920
+  ],
+  "train_window_length_samples": 320,
+  "guard_register_samples": [
+    0,
+    80,
+    320,
+    640
+  ],
+  "counterfactual": "multiply the original real EEG signal within the heldout interval by -1; all source samples outside the heldout interval unchanged. This is synthetic intervention on real EEG, not a clinically plausible counterfactual truth.",
+  "metrics": [
+    "real_signal_unmodified_training_window_l2",
+    "real_signal_negative_control_train_window_l2",
+    "whole_record_filter_counterfactual_training_l2",
+    "relative_l2_transfer_gain",
+    "positive_finite_tail_occurrences",
+    "n_unique_subject_clusters",
+    "raw_edf_sha256",
+    "whole_record_train_effect_monotonicity_by_record_channel"
+  ],
+  "negative_control": "both clean and altered EEG copies have heldout source interval overwritten by exactly the same zero vector BEFORE sosfiltfilt, producing exact equality",
+  "source_data_retention": "never commit original EDF or any EEG sample values; publish only identifiers, checksums and aggregate scalar transfer effects",
+  "registered_unit": "Four independent participants; two runs and two channels per participant are repeated measures. Each guard condition is another repeated counterfactual, NOT an independent participant.",
+  "estimated_record_channel_pairs": 16,
+  "expected_counterfactual_cells": 64,
+  "hard_failure_conditions": [
+    "Any missing/changed subject-run EDF",
+    "any missing C3/C4",
+    "sample frequency not 160",
+    "nonfinite source samples or too short recording",
+    "any unregistered guard or perturbed sample outside heldout interval",
+    "original EDF checksum missing",
+    "zero observed original perturbation norm",
+    "automatic fallback to synthetic data"
+  ],
+  "false_claims_prohibited": [
+    "PhysioNet test train statistical independence",
+    "real-world naturally observed artifact labels",
+    "classifier accuracy improvement",
+    "direct information leakage of labels",
+    "independent replication by a separate group",
+    "new theorem priority for IIR tail propagation",
+    "16 independent subjects",
+    "guaranteed new upstream merge"
+  ]
+}
