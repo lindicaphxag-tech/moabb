@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "scipy>=1.11,<2" "mne>=1.8,<2"
+      - run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "scipy>=1.11,<2" "mne>=1.8,<2" "scikit-learn>=1.5,<2"
       - name: Run untouched real EDF on all registered S025-S028
         env:
           PYTHONUNBUFFERED: "1"
