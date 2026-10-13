@@ -144,7 +144,7 @@ def record_pair(spec,subject,run,cache):
         return {"participant":subject,"run":run,"edf_sha256":digest,
                 "channel_order":names,
                 "edf_bytes":path.stat().st_size,
-                "real_recording_samples":raw.n_times,"rows":rows}
+                "real_recording_samples":int(raw.n_times),"rows":rows}
     finally:
         raw.close()
 
