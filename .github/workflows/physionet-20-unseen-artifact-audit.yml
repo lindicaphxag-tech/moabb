@@ -1,0 +1,40 @@
+name: Independent 20 truly unseen EEG participants original-artifact audit
+on:
+  push:
+    branches:
+      - "research/physionet-eeg-decoder-20-unseen-20261013"
+    paths:
+      - "research/audit_physionet_20_new_subject_decoder.py"
+      - ".github/workflows/physionet-20-unseen-artifact-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  frozen-all-20-subject-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install independent verifier only (not upstream producer model)
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3"
+      - name: Reopen the original four separate real-human data artifacts
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 38341544307
+          pattern: original-unseen-real-EEG-subjects-*
+          merge-multiple: true
+          path: /tmp/all_original_20_eeg_subjects
+      - name: Check immutable subject cohort and recompute 20-person effect
+        run: |
+          python -m research.audit_physionet_20_new_subject_decoder --artifacts /tmp/all_original_20_eeg_subjects --output independent_20_subject_decoder_audit.json
+          test -s independent_20_subject_decoder_audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: independent-20-subject-real-EEG-decision-audit
+          path: independent_20_subject_decoder_audit.json
