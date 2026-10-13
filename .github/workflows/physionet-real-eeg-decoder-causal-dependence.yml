@@ -1,0 +1,38 @@
+name: Frozen real PhysioNet motor imagery classifier counterfactual test
+on:
+  push:
+    branches:
+      - "research/physionet-eeg-decoder-dependence-20261013"
+    paths:
+      - "research/PHYSIONET_EEG_DECODER_CONTRACT_PREREG_20261013.json"
+      - "research/physionet_real_eeg_decoder_source_dependence.py"
+      - ".github/workflows/physionet-real-eeg-decoder-causal-dependence.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  chronological-actual-eeg-decoder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install original public EEG reader and frozen CPU classification
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "scipy>=1.11,<2" "mne>=1.8,<2" "scikit-learn>=1.5,<2"
+      - name: Run real EEGMI event-labeled chronological counterfactual benchmark
+        env:
+          PYTHONUNBUFFERED: "1"
+          MNE_DONTWRITE_HOME: "true"
+        run: |
+          set -o pipefail
+          python -m research.physionet_real_eeg_decoder_source_dependence --cache /tmp/real_edf_decoding --out original_real_eeg_decoder_dependence.json 2>&1 | tee original_real_eeg_decoder_dependence.log
+          test -s original_real_eeg_decoder_dependence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prospective-original-real-mi-eeg-decoder
+          path: |
+            original_real_eeg_decoder_dependence.json
+            original_real_eeg_decoder_dependence.log
