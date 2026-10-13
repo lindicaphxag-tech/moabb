@@ -1,0 +1,93 @@
+{
+  "schema": "prospective_unseen_20_participant_eegbci_counterfactual_decoder_v1",
+  "status": "FROZEN_BEFORE_UNSEEN_COHORT_OUTCOMES",
+  "date": "2026-10-13",
+  "registered_parent_code_blob": "67977ba9a58cdcd13f58b801a15c920874609f7b",
+  "registered_parent_protocol_blob": "25501f7fa3eacc460f4baa116878ca1ec3db947f",
+  "exploratory_subject_ids": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "entire_fresh_subject_ids": [
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24
+  ],
+  "runs": [
+    4,
+    8
+  ],
+  "independent_new_subject_clusters": 20,
+  "new_original_edf_count": 40,
+  "precommitted_per_subject_shards": {
+    "A": [
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "B": [
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "C": [
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "D": [
+      20,
+      21,
+      22,
+      23,
+      24
+    ]
+  },
+  "paired_source_intervention_protocol": "Use identical imported frozen parent `one_original_edf` code: first 2/3 chronological T1/T2 events training, last third test; C3/C4 8-12 and 13-30Hz logpower; whole-run real SOS Butterworth; flip only heldout event raw samples, train on changed vs clean, always evaluate original clean heldout samples.",
+  "primary_endpoint": "per-person arithmetic mean of two within-run mean abs change in heldout predicted class-1 probability under ONLY a test-source intervention; do not treat 40 runs or individual trials as independent people",
+  "secondary_endpoints": [
+    "per-subject any binary test-prediction flip",
+    "subject-level signed accuracy change diagnostic only, no power to guarantee positive accuracy gain",
+    "per-subject train log spectral feature shift",
+    "failed validation or missing EDF explicitly retained in run logs and counted as incomplete, never silently dropped"
+  ],
+  "statistical_plan": "aggregate all 20 by subject; display 20 per-person paired effects, median, min/max; descriptive bootstrap over 20 subject clusters with 2000 fixed RNG seed 20261013 but do not infer clinical causality from artificial perturbation; no statistical tests over 40 runs as independent participants",
+  "stop_conditions": [
+    "no silent removal of new subjects or unbalanced runs",
+    "no modifications to frozen parent model/split/feature after seeing study outputs",
+    "failure to fetch PhysioNet EDF is incomplete evidence not zero effect",
+    "exact SHA pin of parent source must still hold"
+  ],
+  "not_claims": [
+    "no natural signal artifact or label leakage",
+    "no model accuracy improvement invented",
+    "not independently externally validated",
+    "not new universal IIR theorem",
+    "no dataset-specific tuning after the outcome"
+  ]
+}
