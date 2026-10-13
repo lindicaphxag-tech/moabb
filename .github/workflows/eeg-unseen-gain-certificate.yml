@@ -1,0 +1,45 @@
+name: Registered eight new EEGBCI people - actual decision certificate gain stress
+
+on:
+  push:
+    branches:
+      - research/eeg-gain-shift-cert-unseen-20261013
+    paths:
+      - research/UNSEEN_EEG_TRAIN_GAIN_DECISION_CERT_PREREG_20261013.json
+      - research/eeg_unseen_train_gain_decision_certificate.py
+      - .github/workflows/eeg-unseen-gain-certificate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blind-original-edf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [A, B, C, D]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install exact source dependencies
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "scipy>=1.11,<2" "mne>=1.8,<2" "scikit-learn>=1.5,<2"
+      - name: Run registered sensor-gain intervention on actual unseen EEGBCI EDFs
+        env:
+          PYTHONUNBUFFERED: "1"
+          MNE_DONTWRITE_HOME: "true"
+        run: |
+          set -o pipefail
+          python -m research.eeg_unseen_train_gain_decision_certificate --shard ${{ matrix.shard }} --cache /tmp/prospective_eeggain --out "eeg_unseen_gain_${{ matrix.shard }}.json" 2>&1 | tee "eeg_unseen_gain_${{ matrix.shard }}.log"
+          test -s "eeg_unseen_gain_${{ matrix.shard }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-eeg-gain-certified-${{ matrix.shard }}
+          path: |
+            eeg_unseen_gain_${{ matrix.shard }}.json
+            eeg_unseen_gain_${{ matrix.shard }}.log
