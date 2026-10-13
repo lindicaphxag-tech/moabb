@@ -26,6 +26,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: 38336887369
           pattern: real-physionet-edf-filter-original-results
+          merge-multiple: true
           path: /tmp/physionet_original_experiment
       - name: Independently redownload all original source EDF files and replay linearity
         env:
