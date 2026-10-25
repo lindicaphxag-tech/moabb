@@ -4,6 +4,9 @@ on:
     branches:
       - ci/moabb1329-braindecode-native-20261026
   workflow_dispatch:
+  pull_request:
+    branches:
+      - ci/moabb1329-source-snapshot-20261026
 permissions:
   contents: read
 
