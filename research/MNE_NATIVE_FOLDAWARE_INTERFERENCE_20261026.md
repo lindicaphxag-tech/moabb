@@ -37,3 +37,46 @@ This experiment demonstrates that a raw-epoch-purging splitter alone cannot cert
 4. Prove and verify computational/coverage costs; quantify leakage mitigation without claiming EEG performance gains when none are observed.
 
 **Upstream scope boundary:** keep this out of #1329 unless the maintainer explicitly requests a larger end-to-end preprocessing change.
+
+## Stronger native influence-budget gate (2026-10-26, subsequent experiment)
+
+New independent executable: [mne_native_linear_influence_gate.py](./mne_native_linear_influence_gate.py).
+
+For a **fixed native MNE zero-phase filtering configuration**, construct the
+finite-recording cross-dependence matrix `C=P_train H P_test` by applying one
+unit impulse to each of 10 held-out test samples, and observing the resulting
+full-recording filter output. An independently seeded, **unit-L2 test-only
+intervention** checks that `C δx` matches the actual full-recording change.
+
+At 250 Hz, [4.00,4.04) s test input, and 2 s training output windows, we
+obtained linear-replay relative errors **4.36e-15 for FIR** and **6.43e-13 for
+IIR**. The Frobenius bound `||C δx||_2 <= ||C||_F ||δx||_2`
+held for all 12 tested filter/gap cases, up to `1e-12` numerical tolerance.
+
+| Gap (s) | FIR `||C||_F` | IIR `||C||_F` |
+|---:|---:|---:|
+| 0.04 | 0.13813777 | 0.16224108 |
+| 0.30 | 0.06653585 | 0.04736701 |
+| 0.80 | 0.00674182 | 0.01351959 |
+| 1.50 | 0.00119128 | 0.00257838 |
+| 2.50 | below 1e-15 | 0.00022849 |
+| 4.00 | below 1e-15 | 0.00000802 |
+
+For an **exploratory**, unit-norm intervention budget of `0.01`, the smallest
+gap **within the tested candidate grid** was **0.8 s FIR** and **1.5 s IIR**.
+This is a concrete example of filter-specific influence-budget selection; it
+is **not** a global optimum, a pre-registered threshold, nor a measured
+increase in real EEG training coverage or downstream classification quality.
+
+### Generalization limits
+
+- The matrix is constructed for *one finite-length* MNE filter operator and
+  the specified test/train positions. Padding, recording length, channel
+  mixing, time-varying processing, learned transforms, and metadata-dependent
+  preprocessing can alter this operator.
+- The Frobenius norm is a conservative matrix upper bound for this *fixed
+  linear* transform. Measurement error and floating-point residuals near zero
+  are not exact proofs of mathematical zero dependence.
+- To claim a new research algorithm, compare this selector against strong
+  gap-based, embargo, support-aware and fold-aware preprocessing baselines on
+  held-out real EEG before proposing it upstream. Keep #1329 minimal.
