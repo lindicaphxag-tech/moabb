@@ -8,16 +8,11 @@ from moabb.datasets.base import BaseDataset
 from moabb.datasets.download import data_dl, get_dataset_path
 from moabb.datasets.metadata.schema import (
     AcquisitionMetadata,
-    AuxiliaryChannelsMetadata,
-    BCIApplicationMetadata,
-    CrossValidationMetadata,
     DatasetMetadata,
     DocumentationMetadata,
     ExperimentMetadata,
     ParadigmSpecificMetadata,
     ParticipantMetadata,
-    PreprocessingMetadata,
-    SignalProcessingMetadata,
     Tags,
 )
 from moabb.datasets.utils import stim_channels_with_selected_ids
@@ -26,14 +21,21 @@ from moabb.utils import _handle_deprecated_kwargs
 
 BASE_URL = "https://physionet.org/files/eegmmidb/1.0.0/"
 
+# Sampling rate of 106 of the 109 subjects; the 128 Hz runs of subjects 88, 92
+# and 100 are resampled to it.
+_SFREQ = 160.0
+
 
 class PhysionetMI(BaseDataset):
     """Physionet Motor Imagery dataset.
 
-    Physionet MI dataset: https://physionet.org/pn4/eegmmidb/
+    Physionet MI dataset: https://physionet.org/content/eegmmidb/1.0.0/
+    (dataset DOI 10.13026/C28G6P, released on PhysioNet in 2009).
 
     This data set consists of over 1500 one- and two-minute EEG recordings,
-    obtained from 109 volunteers [2]_.
+    obtained from 109 volunteers [2]_. The only associated publication is the
+    BCI2000 platform paper [1]_, which describes the recording software, not
+    this experiment; the protocol below is taken from the PhysioNet record.
 
     Subjects performed different motor/imagery tasks while 64-channel EEG were
     recorded using the BCI2000 system (http://www.bci2000.org) [1]_.
@@ -60,11 +62,24 @@ class PhysionetMI(BaseDataset):
        until the target disappears. Then the subject relaxes.
 
     .. note::
-        Subject 88 was recorded at 128 Hz instead of 160 Hz like all other
-        subjects. Loading subject 88 together with other subjects will cause
-        errors in any paradigm due to incompatible sampling rates. To avoid
-        this, exclude subject 88 when loading the full dataset, e.g.
-        ``PhysionetMI(subjects=[s for s in range(1, 110) if s != 88])``.
+        Subjects 88, 92 and 100 were recorded at 128 Hz instead of 160 Hz like
+        all other subjects (every imagery and execution run of these three
+        subjects; checked on every released file of those runs). MOABB
+        paradigms stack every subject into one array, so the loader resamples
+        any run that is not at 160 Hz to 160 Hz, and all 109 subjects can be
+        loaded together. The signals of subjects 88, 92 and 100 therefore hold
+        no content above 64 Hz.
+
+    .. note::
+        Files are fetched from the byte-identical AWS Open Data mirror
+        (``https://physionet-open.s3.amazonaws.com``) first, because
+        ``physionet.org`` often serves this dataset at tens of kB/s and times
+        out. On any mirror error the loader falls back to ``physionet.org``.
+        Set ``MOABB_S3_MIRROR=0`` to always use ``physionet.org``. For a full
+        bulk copy, ``s5cmd --no-sign-request sync
+        "s3://physionet-open/eegmmidb/1.0.0/*"
+        $MNE_DATA/MNE-eegbci-data/files/eegmmidb/1.0.0/`` fills the same
+        layout the loader expects.
 
     Parameters
     ----------
@@ -92,10 +107,8 @@ class PhysionetMI(BaseDataset):
 
     METADATA = DatasetMetadata(
         acquisition=AcquisitionMetadata(
-            sampling_rate=160.0,
+            sampling_rate=_SFREQ,
             channel_types={"eeg": 64},
-            hardware="Brain Products",
-            reference="mastoid",
             software="BCI2000",
             sensors=[
                 "FC5",
@@ -164,9 +177,6 @@ class PhysionetMI(BaseDataset):
                 "Iz",
             ],
             line_freq=60.0,
-            auxiliary_channels=AuxiliaryChannelsMetadata(
-                has_emg=True, other_physiological=["ppg"]
-            ),
             sensor_type="EEG",
             montage="standard_1020",
         ),
@@ -178,101 +188,50 @@ class PhysionetMI(BaseDataset):
             paradigm="imagery",
             n_classes=4,
             class_labels=["left_hand", "right_hand", "feet", "rest"],
-            study_design="Multiple BCI paradigms implemented: (1) mu/beta rhythm cursor control where users control vertical cursor movement via sensorimotor rhythm amplitude, (2) SCP cursor control where users control slow cortical potentials for cursor movement, (3) P300 speller for character selection, (4) motor imagery tasks for various applications",
-            feedback_type="visual",
+            study_design="14 runs per subject: two one-minute baseline recordings (eyes open, eyes closed) followed by three repetitions of four two-minute task conditions (executed/imagined unilateral fist movements to left/right targets; executed/imagined bilateral fists/feet movements to top/bottom targets)",
             stimulus_type="cue-based",
             stimulus_modalities=["visual"],
             primary_modality="visual",
-            mode="both",
             synchronicity="cued",
         ),
         documentation=DocumentationMetadata(
-            doi="10.1109/TBME.2004.827072",
+            doi="10.13026/C28G6P",
+            associated_paper_doi="10.1109/TBME.2004.827072",
             investigators=[
                 "Gerwin Schalk",
+                "W. A. Sarnacki",
+                "Aditya Joshi",
                 "Dennis J. McFarland",
-                "Thilo Hinterberger",
-                "Niels Birbaumer",
                 "Jonathan R. Wolpaw",
             ],
             institution="Wadsworth Center, New York State Department of Health",
-            country="USA",
-            publication_year=2004,
+            country="US",
+            publication_year=2009,
             senior_author="Jonathan R. Wolpaw",
-            institution_address="Albany, NY 12201-0509 USA",
-            institution_department="Laboratory of Nervous System Disorders",
-            funding=[
-                "National Center for Medical Rehabilitation Research, National Institute of Child Health and Human Development, National Institutes of Health (NIH) under Grant HD30146",
-                "National Institute of Biomedical Imaging and Bioengineering and the National Institute of Neurological Disorders and Stroke, NIH, under Grant EB00856",
-                "Deutsche Forschungsgemeinschaft (DFG)",
-                "Federal Ministry of Education and Research (BMBF)",
-            ],
+            institution_address="Albany, New York, USA",
+            institution_department="BCI R&D Program",
+            funding=["NIH/NIBIB grants EB006356 and EB00856"],
             contact_info=["schalk@wadsworth.org"],
             keywords=[
-                "Assistive devices",
-                "augmentative communication",
                 "brain-computer interface (BCI)",
-                "ECoG",
                 "electroencephalography (EEG)",
-                "psychophysiology",
-                "rehabilitation",
+                "motor imagery",
+                "motor execution",
             ],
             license="ODC-By-1.0",
             repository="Physionet",
+            data_url="https://physionet.org/content/eegmmidb/1.0.0/",
+            how_to_acknowledge="Schalk, G. (2009). EEG Motor Movement/Imagery Dataset (version 1.0.0). PhysioNet. https://doi.org/10.13026/C28G6P; additionally cite Schalk et al. (2004) BCI2000, IEEE TBME 51(6):1034-1043.",
         ),
         tags=Tags(pathology=["Healthy"], modality=["Motor"], type=["Motor Imagery"]),
-        preprocessing=PreprocessingMetadata(
-            data_state="raw EEG stored with all event markers for offline reconstruction",
-            preprocessing_applied=True,
-            preprocessing_steps=[
-                "calibration (linear transformation to microvolts)",
-                "spatial filtering",
-                "temporal filtering",
-            ],
-            artifact_methods=["artifact detection"],
-            re_reference="common average",
-        ),
-        signal_processing=SignalProcessingMetadata(
-            feature_extraction=[
-                "CSP",
-                "ERD",
-                "ERS",
-                "AR",
-                "spectral amplitude",
-                "slow cortical potentials",
-                "P300 evoked potentials",
-            ],
-            spatial_filters=[
-                "Laplacian derivation",
-                "common average",
-                "independent components",
-                "common spatial patterns",
-            ],
-            frequency_bands={"mu": [8.0, 12.0], "beta": [12.0, 30.0]},
-        ),
-        bci_application=BCIApplicationMetadata(
-            applications=[
-                "speller",
-                "cursor_control",
-                "communication",
-                "neuroprosthesis",
-                "orthosis",
-            ],
-            environment="laboratory",
-            online_feedback=True,
-        ),
         paradigm_specific=ParadigmSpecificMetadata(
             detected_paradigm="imagery",
             imagery_tasks=["left_hand", "right_hand", "feet", "rest"],
         ),
-        performance={"itr_bits_per_min": 25.0},
-        cross_validation=CrossValidationMetadata(evaluation_type=["online", "offline"]),
         sessions_per_subject=1,
         runs_per_session=6,
-        data_processed=True,
+        data_processed=False,
         file_format="edf",
-        abstract="BCI2000 is a documented general-purpose brain-computer interface (BCI) research and development platform that can incorporate alone or in combination any brain signals, signal processing methods, output devices, and operating protocols. The system is based on a modular design consisting of four modules (operator, source, signal processing, and application) that communicate through a documented network-capable protocol. BCI2000 has been used to create BCI systems for a variety of brain signals (slow cortical potentials, P300 evoked potentials, sensorimotor rhythms, cortical surface potentials, and neuronal action potentials), processing methods (spectral estimation, spatial filtering, linear classification), and applications (cursor control, word processing, wheelchair control, neuroprosthesis control). The system satisfies stringent real-time requirements and facilitates systematic research and development of BCI technology.",
-        methodology="The BCI2000 system implements a four-module architecture: 1) Source module digitizes and stores brain signals without preprocessing, 2) Signal processing module performs feature extraction (calibration, spatial filtering, temporal filtering) and feature translation (linear classification, normalization), 3) User application module receives control signals and drives applications with visual/auditory/haptic feedback, 4) Operator module defines system parameters and operation timing. Signal processing uses cascaded signal operators for flexible feature extraction including autoregressive spectral estimation, FIR filtering, slow wave filtering, peak detection, and evoked response averaging. Translation algorithms use linear classifiers and normalizers with optional real-time adaptive parameter updates. All system variables (parameters, event markers, signals) are stored in documented file format with ASCII header and binary data for comprehensive offline analysis.",
     )
     nemar_id = "on004362"
     nemar_subject_template = "{subject:03d}"
@@ -303,7 +262,7 @@ class PhysionetMI(BaseDataset):
             # interval between 2 trial is 4 second.
             interval=[0, 3],
             paradigm="imagery",
-            doi="10.1109/TBME.2004.827072",
+            doi="10.13026/C28G6P",
             selected_subjects=subjects,
             selected_sessions=sessions,
             return_all_modalities=return_all_modalities,
@@ -325,6 +284,11 @@ class PhysionetMI(BaseDataset):
     def _load_one_run(self, subject, run, preload=True):
         raw_fname = self._load_data(subject, runs=[run], verbose="ERROR")[0]
         raw = read_raw_edf(raw_fname, preload=preload, verbose="ERROR")
+        if raw.info["sfreq"] != _SFREQ:
+            # Subjects 88, 92 and 100 were recorded at 128 Hz; one rate for
+            # all subjects.
+            # The annotations keep their times through the resampling.
+            raw.load_data(verbose="ERROR").resample(_SFREQ, verbose="ERROR")
         raw.rename_channels(lambda x: x.strip("."))
         raw.rename_channels(lambda x: x.upper())
         # fmt: off

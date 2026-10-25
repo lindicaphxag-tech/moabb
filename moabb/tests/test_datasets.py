@@ -1,9 +1,13 @@
 import inspect
+import io
 import json
 import logging
 import re
 import warnings
-from unittest.mock import patch
+import zipfile
+import zlib
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import mne
 import numpy as np
@@ -15,11 +19,14 @@ import moabb.datasets.compound_dataset as db_compound
 from moabb.datasets import (
     BNCI2014_001,
     Cattan2019_VR,
+    Han2026,
     Kojima2024A,
     Kojima2024B,
+    PerezBlanco2026,
     Shin2017A,
     Shin2017B,
     Thielen2015,
+    Wang2026,
 )
 from moabb.datasets.base import (
     BaseDataset,
@@ -57,29 +64,35 @@ NEMAR_ID_PATTERN = r"(nm|on|ds)\d{6}"
 NEMAR_ID_EXEMPT = {
     "FakeDataset",
     "FakeVirtualRealityDataset",
-    "Schrag2026Pediatric",
-    "Lenaig2026",
-    "Wang2026",
+    # Deposits that exist but are private: their publication was denied, so a
+    # class attribute would only make every load try NEMAR and fall back.
+    # Set ``nemar_id`` once each deposit is published.
+    "Brodu2012",  # nm000366 (licence "free for research use": author consent)
+    "Gueho2026",  # nm000333 (Lenaig2026 alias) (CC BY-NC-ND 4.0: a conversion is an adaptation)
+    "MartinezPeon2025",  # nm000332 (CC BY-NC-SA 4.0: authors' permission)
+    "MIBMPI2024",  # nm000331 (licence/consent evidence requested by NEMAR)
+    "MIND2026",  # nm000337 (acquisition timestamps to coarsen)
+    # No NEMAR deposit yet; BIDS deposits prepared, not uploaded.
+    "Yagan2023",  # Mendeley Data vyczny2r4w
+    "Wang2026Handwriting",  # figshare 29987758
 }
 # Datasets whose NEMAR deposit is assigned but not yet public (private,
 # pending publication). Their ids are valid and still checked; tracked here
 # so we know which deposits remain to be published.
 NEMAR_ID_PENDING = {
-    "AguileraRodriguez2025": "nm000174",
-    "BCIComp2020UpperLimb": "nm000233",
-    "BCIComp2020WalkingERP": "nm000184",
-    "BNCI2020_001": "nm000178",
-    "Beetl2021_A": "nm000220",
-    "Beetl2021_B": "nm000274",
-    "Kaneshiro2015": "nm000263",
-    "Kumar2024": "nm000177",
-    "Lee2019_SSVEP": "nm000273",
-    "Mainsah2025_A": "nm000269",
-    "Nguyen2017_L": "nm000252",
-    "Nguyen2017_S": "nm000257",
-    "Nguyen2017_SL": "nm000224",
-    "Nguyen2017_V": "nm000261",
-    "Pressel2016": "nm000258",
+    # Removed on 2026-10-08: the other 30 deposits listed here were published
+    # on NEMAR and are anonymously reachable.
+    # Removed on 2026-10-05: these 15 deposits were published on NEMAR and are
+    # anonymously reachable (fresh clone + annexed-EDF HTTP 200 against
+    # https://nemar.s3.us-east-2.amazonaws.com/<id>/objects/<key>).
+    #   nm000174 AguileraRodriguez2025, nm000177 Kumar2024, nm000178 BNCI2020_001,
+    #   nm000184 BCIComp2020WalkingERP, nm000220 Beetl2021_A, nm000224 Nguyen2017_SL,
+    #   nm000233 BCIComp2020UpperLimb, nm000252 Nguyen2017_L, nm000257 Nguyen2017_S,
+    #   nm000258 Pressel2016, nm000261 Nguyen2017_V, nm000263 Kaneshiro2015,
+    #   nm000269 Mainsah2025_A, nm000273 Lee2019_SSVEP, nm000274 Beetl2021_B.
+    # Removed on 2026-10-06 (published): nm000292 Vagaja2023.
+    # Removed on 2026-10-17 (published): nm000304 PerezBlanco2026.
+    "Ma2022": "nm000288"
 }
 
 
@@ -337,13 +350,36 @@ class Test_Datasets:
             pytest.param(BNCI2014_001, "nm000139", id="BNCI2014_001"),
             pytest.param(BI2012, "nm000260", id="BI2012"),
             pytest.param(Thielen2015, "nm000196", id="Thielen2015"),
+            pytest.param(PerezBlanco2026, "nm000304", id="PerezBlanco2026"),
+            pytest.param(Wang2026, "nm000335", id="Wang2026"),
+            pytest.param(Han2026, "on007327", id="Han2026"),
         ],
     )
     def test_nemar_id_class_attributes(self, dataset, nemar_id):
         assert dataset.nemar_id == nemar_id
 
+    def test_wang2026_matches_the_deposit_subject_labels(self):
+        """nm000335 files each subject as ``sub-<global id>``, not the bare id."""
+        from moabb.datasets.download import _manifest_subject_files
+
+        record = {
+            "files": [
+                {"file": "JointLearning/S001/S001_run0.mat", "subject": "sub-1"},
+                {"file": "TactileControl/S001/S001_run0.mat", "subject": "sub-24"},
+            ]
+        }
+        ds = Wang2026()
+        assert _manifest_subject_files(record, ds._nemar_subject_ids(1)) == [
+            "JointLearning/S001/S001_run0.mat"
+        ]
+        assert _manifest_subject_files(record, ds._nemar_subject_ids(24)) == [
+            "TactileControl/S001/S001_run0.mat"
+        ]
+
     @pytest.mark.parametrize("dataset", dataset_list)
     def test_all_datasets_have_valid_nemar_id(self, dataset):
+        if dataset.__name__ in {old for old, _n, _e in aliases_list}:
+            pytest.skip("deprecated alias")
         if dataset.__name__ in NEMAR_ID_EXEMPT:
             pytest.skip(f"{dataset.__name__} has no NEMAR deposit")
         if dataset.__name__ in NEMAR_ID_PENDING:
@@ -409,6 +445,79 @@ class Test_Datasets:
         dataset.sourcedata_path(subject=1, path=tmp_path)
 
         assert calls[-1]["subject"] == expected
+
+    @pytest.mark.parametrize(
+        ("labels", "subject", "expected"),
+        [
+            pytest.param({1: "zdvm", 2: "bvgy"}, 1, "zdvm", id="lowercase-word"),
+            pytest.param({1: "A01", 2: "A02"}, 2, "A02", id="alphanumeric"),
+            pytest.param({1: "001"}, 1, "001", id="zero-padded-digits"),
+        ],
+    )
+    def test_nemar_subject_accepts_explicit_mapping(self, labels, subject, expected):
+        """BIDS subject labels can be any alphanumeric string (gh-1098).
+
+        A ``{moabb_subject: bids_label}`` mapping covers labels no format
+        template can produce, such as ``sub-zdvm`` or ``sub-A01``.
+        """
+        dataset = FakeDataset(n_subjects=2)
+        dataset.nemar_subject_template = labels
+
+        assert dataset._nemar_subject(subject) == expected
+
+    def test_nemar_subject_mapping_reaches_nemar_dl(self, monkeypatch, tmp_path):
+        """The mapped label, not the MOABB integer, is what NEMAR receives."""
+        dataset = FakeDataset(n_subjects=2)
+        dataset.nemar_id = "nm000001"
+        dataset.nemar_subject_template = {1: "zdvm", 2: "bvgy"}
+        calls = []
+
+        def nemar_dl(*args, **kwargs):
+            calls.append(kwargs["subject"])
+            return str(tmp_path)
+
+        monkeypatch.setattr("moabb.datasets.base.nemar_dl", nemar_dl)
+        dataset._download_nemar(subject=2, path=tmp_path)
+
+        assert calls == ["bvgy"]
+
+    def test_sourcedata_path_aliases_mapped_label(self, monkeypatch, tmp_path):
+        """A mapped label is offered alongside the raw MOABB id."""
+        dataset = FakeDataset(n_subjects=1)
+        dataset.nemar_id = "nm000001"
+        dataset.nemar_subject_template = {1: "A01"}
+        calls = []
+
+        def nemar_sourcedata_dl(*args, **kwargs):
+            calls.append(kwargs["subject"])
+            return str(tmp_path)
+
+        monkeypatch.setattr(
+            "moabb.datasets.base.nemar_sourcedata_dl", nemar_sourcedata_dl
+        )
+        dataset.sourcedata_path(subject=1, path=tmp_path)
+
+        assert calls == [[1, "A01"]]
+
+    def test_nemar_subject_mapping_missing_subject_raises(self):
+        dataset = FakeDataset(n_subjects=2)
+        dataset.nemar_subject_template = {1: "zdvm"}
+
+        with pytest.raises(RuntimeError, match=r"subject 2 .*no NEMAR label"):
+            dataset._nemar_subject(2)
+
+    def test_lioi2020_xp2_uses_declarative_subject_mapping(self):
+        """Lioi2020_XP2's non-contiguous labels need no method override."""
+        from moabb.datasets import Lioi2020_XP2
+        from moabb.datasets.base import BaseDataset
+
+        assert Lioi2020_XP2._nemar_subject is BaseDataset._nemar_subject
+        dataset = Lioi2020_XP2()
+        labels = [dataset._nemar_subject(s) for s in dataset.subject_list]
+        assert labels[:3] == ["xp201", "xp202", "xp203"]
+        assert dataset._nemar_subject(8) == "xp210"
+        assert labels[-1] == "xp222"
+        assert len(set(labels)) == len(dataset.subject_list) == 17
 
     def test_download_falls_back_from_nemar(self, monkeypatch, tmp_path):
         dataset = FakeDataset(n_subjects=1)
@@ -836,7 +945,10 @@ class TestSubjectSessionFiltering:
 
     def test_all_datasets_accept_subjects_param(self):
         """Every dataset class in dataset_list accepts subjects or sessions."""
+        deprecated = {old for old, _new, _exp in aliases_list}
         for cls in dataset_list:
+            if cls.__name__ in deprecated:
+                continue  # deprecated alias: delegates to the renamed class
             sig = inspect.signature(cls.__init__)
             params = set(sig.parameters.keys())
             # Check own params or inherited from parent
@@ -1806,3 +1918,118 @@ def test_lee2024_data_path_downloads_the_real_upstream_inventory(tmp_path, monke
     )
     dataset.data_path(1, path=str(tmp_path))
     assert [fname for _, fname in calls] == ["Doorlock/Dat_sub01/sub01_Testing1.mat"]
+
+
+def test_netbci2026_events_replace_markers_and_off_rate_run_is_resampled(
+    tmp_path, monkeypatch
+):
+    """Each trial is epoched once and an off-rate run yields 250 Hz epochs.
+
+    The .vmrk carries the same two codes as events.tsv; adding rather than
+    replacing would double every trial (the Iwama2023 failure mode). Ten runs
+    are at 249.9 Hz (six at 1000 Hz, same resample path); event times are kept.
+    """
+    sfreq = 249.89999389648438
+    info = mne.create_info(["C3", "C4"], sfreq, "eeg")
+    raw = mne.io.RawArray(np.zeros((2, int(40 * sfreq))), info, verbose=False)
+    onsets = [7.314926149046683, 14.249700227984265, 21.0, 28.0]
+    raw.set_annotations(
+        mne.Annotations(onsets, [0.0] * 4, ["Stimulus/S  1", "Stimulus/S  2"] * 2)
+    )
+    stem = tmp_path / "sub-01_ses-01_task-MotorImageryRest_run-04"
+    (tmp_path / f"{stem.name}_events.tsv").write_text(
+        "onset\tduration\ttrial_type\tvalue\tsample\n"
+        + "".join(
+            f"{o}\t0.0\t{v}\t{v}\t{int(o * sfreq)}\n"
+            for o, v in zip(onsets, [1, 2, 1, 2])
+        )
+    )
+    dataset = db.NETBCI2026(subjects=[1])
+    bids_path = SimpleNamespace(fpath=f"{stem}_eeg.vhdr", session="01", run="04")
+    monkeypatch.setattr(dataset, "bids_paths", Mock(return_value=[bids_path]))
+    reader = Mock(return_value=raw.copy())
+    monkeypatch.setattr(mne.io, "read_raw_brainvision", reader)
+    out = dataset._get_single_subject_data(1)["01"]["04"]
+    dataset.bids_paths.assert_called_once_with(1)
+    assert str(reader.call_args.args[0]) == f"{stem}_eeg.vhdr"
+    assert out.info["sfreq"] == 250.0
+    events = mne.find_events(out, shortest_event=0, verbose=False)
+    assert events[:, 2].tolist() == [1, 2, 1, 2]
+    np.testing.assert_allclose(events[:, 0] / 250.0, onsets, atol=4e-3)
+
+
+def test_netbci2026_subject_members_are_eeg_motor_imagery_only():
+    names = [
+        "sub-01/",
+        "sub-01/ses-01/eeg/sub-01_ses-01_task-MotorImageryRest_run-01_eeg.eeg",
+        "sub-01/ses-01/eeg/sub-01_ses-01_task-MotorImageryRest_run-01_events.tsv",
+        "sub-01/ses-01/eeg/sub-01_ses-01_space-CapTrak_electrodes.tsv",
+        "sub-01/ses-01/eeg/sub-01_ses-01_task-rest_run-01_eeg.eeg",
+        "sub-01/ses-01/meg/sub-01_ses-01_task-MotorImageryRest_run-01_meg.fif",
+        "sub-01/ses-01/.DS_Store",
+        "sub-10/ses-01/eeg/sub-10_ses-01_task-MotorImageryRest_run-01_eeg.eeg",
+        "__MACOSX/sub-01/ses-01/._.DS_Store",
+    ]
+    infos = [zipfile.ZipInfo(name) for name in names]
+    for offset, info in enumerate(reversed(infos)):
+        info.header_offset = offset  # archive order differs from listing order
+    members = db.NETBCI2026._subject_members(infos, 1)
+    assert [info.filename for info in members] == [names[3], names[2], names[1]]
+
+
+def test_netbci2026_staged_subject_skips_the_network(tmp_path, monkeypatch):
+    netbci = db.netbci2026
+    root = tmp_path / "MNE-netbci2026-data"
+    for ses in range(1, 5):
+        eeg = root / "sub-02" / f"ses-{ses:02d}" / "eeg"
+        eeg.mkdir(parents=True)
+        for run in range(1, 7):
+            stem = f"sub-02_ses-{ses:02d}_task-MotorImageryRest_run-{run:02d}_"
+            for suffix in netbci._RUN_SUFFIXES:
+                (eeg / f"{stem}{suffix}").touch()
+    monkeypatch.setattr(netbci, "get_dataset_path", Mock(return_value=str(tmp_path)))
+    monkeypatch.delattr(netbci.requests, "Session")  # any network use fails
+    assert db.NETBCI2026()._download_subject(2, None, False, None, None) == str(root)
+
+
+class _BytesRemote:
+    """Stand-in for ``netbci2026._HTTPRangeFile`` backed by local bytes."""
+
+    def __init__(self, data):
+        self.data = data
+        self.n_requests = 0
+
+    def read_range(self, start, length):
+        self.n_requests += 1
+        return self.data[start : start + length]
+
+
+@pytest.mark.parametrize(
+    "compression", [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED], ids=["stored", "deflated"]
+)
+def test_netbci2026_read_member_one_request_and_crc(compression):
+    payload = {"a/first.eeg": b"\x00\x01" * 5000, "a/second.tsv": b"onset\tvalue\n1\t1\n"}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=compression) as zf:
+        for name, data in payload.items():
+            zf.writestr(name, data)
+    remote = _BytesRemote(buf.getvalue())
+    infos = zipfile.ZipFile(buf).infolist()
+    for info in infos:
+        assert db.NETBCI2026._read_member(remote, info) == payload[info.filename]
+    assert remote.n_requests == len(infos)  # one range request per member
+
+    corrupt = bytearray(remote.data)
+    corrupt[infos[0].header_offset + 30 + len(infos[0].filename) + 10] ^= 0xFF
+    with pytest.raises((OSError, zlib.error)):
+        db.NETBCI2026._read_member(_BytesRemote(bytes(corrupt)), infos[0])
+
+
+def test_netbci2026_root_files_are_md5_checked(tmp_path, monkeypatch):
+    netbci = db.netbci2026
+    session = Mock()
+    session.get.return_value.content = b"tampered"
+    monkeypatch.setattr(netbci, "get_dataset_path", Mock(return_value=str(tmp_path)))
+    monkeypatch.setattr(netbci.requests, "Session", Mock(return_value=session))
+    with pytest.raises(OSError, match="MD5"):
+        db.NETBCI2026()._download_subject(3, None, False, None, None)

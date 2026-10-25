@@ -1,9 +1,14 @@
+import hashlib
 import importlib
+import importlib.util
 import logging
 import os
+import re
+import sys
 from collections import OrderedDict
 from copy import deepcopy
 from glob import glob
+from importlib.resources import as_file, files
 
 import numpy as np
 import scipy.signal as scp
@@ -72,71 +77,184 @@ def create_pipeline_from_config(config):
     return pipeline
 
 
+def _pipeline_module_name(python_file):
+    """Return a module name for a Python pipeline config that no other uses.
+
+    The name is derived from the absolute path, so two configs sharing a file
+    name in different directories get different modules, and a fresh process
+    that parses the same file first gets the same name again (which lets it
+    unpickle models saved from it). A file parsed again in the same process
+    gets a new name, so objects from the earlier parse remain picklable.
+    """
+    path = os.path.abspath(python_file)
+    stem = re.sub(r"\W", "_", os.path.splitext(os.path.basename(path))[0])
+    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
+    base = f"moabb_pipeline_config_{stem}_{digest}"
+    name, n_loaded = base, 0
+    while name in sys.modules:
+        n_loaded += 1
+        name = f"{base}_{n_loaded}"
+    return name
+
+
+def _pickle_by_value_in_workers(module):
+    """Send the objects of ``module`` to joblib/loky workers by value.
+
+    A worker process cannot import a module that was executed from a config
+    file, so cloudpickle must not pickle its functions and classes by
+    reference now that the module is registered in ``sys.modules``.
+    """
+    for name in ("joblib.externals.cloudpickle", "cloudpickle"):
+        try:
+            cloudpickle = importlib.import_module(name)
+        except ImportError:
+            continue
+        register = getattr(cloudpickle, "register_pickle_by_value", None)
+        if register is not None:
+            register(module)
+
+
+def _load_python_pipeline_config(python_file):
+    """Execute a Python pipeline config as a module registered in sys.modules.
+
+    pickle stores functions and classes by module name, so anything defined in
+    the config (e.g. the function of a ``FunctionTransformer``) can only be
+    pickled (``pickle.dumps``, ``save_model``) if its module is found in
+    ``sys.modules``.
+    """
+    module_name = _pipeline_module_name(python_file)
+    spec = importlib.util.spec_from_file_location(module_name, python_file)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    if not hasattr(module, "PIPELINE"):
+        sys.modules.pop(module_name, None)
+        raise ValueError(
+            f"Python pipeline config {python_file} must define a PIPELINE object"
+        )
+    _pickle_by_value_in_workers(module)
+    return module.PIPELINE
+
+
 def parse_pipelines_from_directory(dir_path):
-    """Takes in the path to a directory with pipeline configuration files and
-    returns a dictionary of pipelines.
+    """Parse pipeline configuration files from a directory or one config file.
 
     Parameters
     ----------
-    dir_path: str
-        Path to directory containing pipeline config .yml or .py files
-        or to a single pipeline config file.
+    dir_path : path-like
+        Directory containing .yml/.py pipeline configs, or a single pipeline
+        config file.
 
     Returns
     -------
-    pipeline_configs: dict
-        Generated pipeline config dictionaries. Each entry has structure:
-        'name': string
-        'pipeline': sklearn.BaseEstimator
-        'paradigms': list of class names that are compatible with said pipeline
+    pipeline_configs : list of dict
+        Generated pipeline config dictionaries. Each entry contains name,
+        pipeline and paradigms; YAML configs may also contain param_grid.
+
+    Notes
+    -----
+    Each Python config is executed as its own module, registered in
+    :data:`sys.modules` under a name derived from its path
+    (``moabb_pipeline_config_<file name>_<hash>``), so functions and classes it
+    defines can be pickled, e.g. by ``save_model``. To unpickle such a model in
+    another Python session, parse the same config file first.
+
+    Raises
+    ------
+    ValueError
+        If the path is invalid, a directory contains no pipeline configs, or a
+        Python config does not define PIPELINE.
     """
+    dir_path = os.fspath(dir_path)
+    yaml_files = []
+    python_files = []
+
     if dir_path.endswith(".yml"):
-        if not os.path.isfile(dir_path):  # was assert, now raises properly
+        if not os.path.isfile(dir_path):
             raise ValueError(f"Given pipeline path {dir_path} is not valid")
         yaml_files = [dir_path]
+    elif dir_path.endswith(".py"):
+        if not os.path.isfile(dir_path):
+            raise ValueError(f"Given pipeline path {dir_path} is not valid")
+        python_files = [dir_path]
     else:
-        if not os.path.isdir(os.path.abspath(dir_path)):  # was assert
+        if not os.path.isdir(os.path.abspath(dir_path)):
             raise ValueError(f"Given pipeline path {dir_path} is not valid")
 
-        # get list of config files
         yaml_files = glob(os.path.join(dir_path, "*.yml"))
+        python_files = glob(os.path.join(dir_path, "*.py"))
+        if not yaml_files and not python_files:
+            raise ValueError(
+                f"No pipeline configuration files (.yml or .py) found in {dir_path}"
+            )
 
     pipeline_configs = []
-    for yaml_file in yaml_files:
+    for yaml_file in sorted(yaml_files):
         with _open_lock(yaml_file, "r") as _file:
-            content = _file.read()
-
-            # load config
-            config_dict = yaml.load(content, Loader=yaml.FullLoader)
+            config_dict = yaml.load(_file.read(), Loader=yaml.FullLoader)
             ppl = create_pipeline_from_config(config_dict["pipeline"])
+            pipeline_config = {
+                "paradigms": config_dict["paradigms"],
+                "pipeline": ppl,
+                "name": config_dict["name"],
+            }
             if "param_grid" in config_dict:
-                pipeline_configs.append(
-                    {
-                        "paradigms": config_dict["paradigms"],
-                        "pipeline": ppl,
-                        "name": config_dict["name"],
-                        "param_grid": config_dict["param_grid"],
-                    }
-                )
-            else:
-                pipeline_configs.append(
-                    {
-                        "paradigms": config_dict["paradigms"],
-                        "pipeline": ppl,
-                        "name": config_dict["name"],
-                    }
-                )
+                pipeline_config["param_grid"] = config_dict["param_grid"]
+            pipeline_configs.append(pipeline_config)
 
-    # we can do the same for python defined pipeline
-    # TODO for python pipelines
-    python_files = glob(os.path.join(dir_path, "*.py"))
+    for python_file in sorted(python_files):
+        pipeline_configs.append(_load_python_pipeline_config(python_file))
 
-    for python_file in python_files:
-        spec = importlib.util.spec_from_file_location("custom", python_file)
-        foo = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(foo)
+    return pipeline_configs
 
-        pipeline_configs.append(foo.PIPELINE)
+
+def get_benchmark_pipelines(paradigm=None):
+    """Load the reference benchmark pipelines shipped with MOABB.
+
+    Parameters
+    ----------
+    paradigm : str | None
+        If provided, return only configs declaring compatibility with this
+        paradigm class name, for example "LeftRightImagery" or "SSVEP".
+
+    Returns
+    -------
+    pipeline_configs : list of dict
+        Pipeline config dictionaries in the format accepted by moabb.benchmark.
+
+    Notes
+    -----
+    The reference configs are package data, so this accessor works from a
+    normal wheel/sdist installation and does not depend on the current working
+    directory or a source checkout.
+    """
+    config_dir = files("moabb.pipelines").joinpath("configs")
+    resources = sorted(
+        (
+            resource
+            for resource in config_dir.iterdir()
+            if resource.name != "__init__.py" and resource.name.endswith((".yml", ".py"))
+        ),
+        key=lambda resource: resource.name,
+    )
+    if not resources:
+        raise RuntimeError("MOABB reference benchmark pipeline configs are missing")
+
+    pipeline_configs = []
+    for resource in resources:
+        # as_file also supports resources from non-filesystem importers.
+        with as_file(resource) as config_path:
+            pipeline_configs.extend(parse_pipelines_from_directory(config_path))
+
+    if paradigm is not None:
+        pipeline_configs = [
+            config for config in pipeline_configs if paradigm in config["paradigms"]
+        ]
+
     return pipeline_configs
 
 

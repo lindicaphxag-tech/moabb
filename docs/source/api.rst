@@ -54,6 +54,28 @@ Motor Imagery Datasets
     :template: class.rst
 
     AlexMI
+    Leelakittisin2025
+    PerezBlanco2026
+    Vagaja2023
+    MartinezPeon2025
+    MILimbEEG
+    Pan2023
+    Pan2025
+    PoloHortiguela2025
+    Batista2022
+    Farabbi2020
+    Han2026
+    Kodera2023
+    Kueper2024
+    Brodu2012
+    IMUMIA2026
+    Leeuwis2021
+    MartinezPeon2024
+    PardoGarcia2026
+    Jia2019
+    MIBMPI2024
+    Ortiz2023
+    Wang2025
     BNCI2003_004
     BNCI2014_001
     BNCI2014_002
@@ -63,7 +85,6 @@ Motor Imagery Datasets
     BNCI2019_001
     BNCI2020_001
     BNCI2022_001
-    BNCI2024_001
     BNCI2025_001
     BNCI2025_002
     Cho2017
@@ -72,15 +93,29 @@ Motor Imagery Datasets
     Dreyer2023A
     Dreyer2023B
     Dreyer2023C
+    Daly2020
+    Damm2026
+    Peterson2020
     Lee2019_MI
     GrosseWentrup2009
+    MIND2026
+    MOVING2024
+    NeBULA2025
+    Thapa2025
     Ofner2017
     PhysionetMI
+    Perdikis2018
+    Alawieh2025
     Schirrmeister2017
+    NeuroTUMBCI2025
+    Shin2022
     Shin2017A
-    Shin2017B
     Weibo2014
     Zhou2016
+    MIMED2024
+    WRCC2023_MI_A
+    WRCC2023_MI_B
+    WRCC2023_MI_C
     Stieger2021
     Liu2024
     Beetl2021_A
@@ -93,11 +128,17 @@ Motor Imagery Datasets
     GuttmannFlury2025_ME
     GuttmannFlury2025_MI
     HefmiIch2025
+    Iwama2023
     Jeong2020
     Kaya2018
     Kumar2024
+    Lee2022
+    Lioi2020_XP1
+    Lioi2020_XP2
     Liu2025
     Ma2020
+    Ma2022
+    NETBCI2026
     Rozado2015
     Tavakolan2017
     TrianaGuzman2024
@@ -131,6 +172,23 @@ tag with motor imagery and can be decoded with the existing
     Nguyen2017_V
     Nieto2022
     Pressel2016
+
+-----------------------
+Cognitive Task Datasets
+-----------------------
+
+Non-motor endogenous tasks decoded with
+:class:`~moabb.paradigms.CognitiveTask` (``paradigm="cognitive"``):
+mental arithmetic, handwriting/stroke imagery, mental rotation,
+word generation, music imagery.
+
+.. autosummary::
+    :toctree: generated/
+    :template: class.rst
+
+    Shin2017B
+    BNCI2024_001
+    Wang2026Handwriting
 
 -----------------
 ERP/P300 Datasets
@@ -202,8 +260,10 @@ ERP/P300 Datasets
     Mainsah2025_R
     Mainsah2025_S1
     Mainsah2025_S2
+    Peters2026
     Simoes2020
     Speier2017
+    Yagan2023
     Zhang2025
     Zheng2020
     BCIComp2020WalkingERP
@@ -228,7 +288,7 @@ SSVEP Datasets
     Han2024Fatigue
     Kim2025BetaRange
     Lee2021Mobile_SSVEP
-    Lenaig2026
+    Gueho2026
     Liu2020BETA
     Liu2022EldBETA
     Wang2021Combined
@@ -375,6 +435,21 @@ work (Aguilera-Rodriguez et al. 2025).
 
     FilterBankLeftRightImagery
     FilterBankMotorImagery
+
+------------------------
+Cognitive Task Paradigms
+------------------------
+
+Standalone ``cognitive`` paradigm for non-motor endogenous tasks
+(handwriting/stroke imagery, mental arithmetic, mental rotation,
+word generation, music imagery). Valid on both ``paradigm="cognitive"``
+datasets and the existing ``paradigm="imagery"`` tag.
+
+.. autosummary::
+    :toctree: generated/
+    :template: class.rst
+
+    CognitiveTask
 
 --------------
 P300 Paradigms
@@ -536,6 +611,7 @@ Plotting
     :template: function.rst
 
     plotting.score_plot
+    plotting.plot_critical_difference
     plotting.paired_plot
     plotting.summary_plot
     plotting.meta_analysis_plot

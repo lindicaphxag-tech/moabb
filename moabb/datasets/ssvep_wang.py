@@ -302,7 +302,7 @@ class Wang2016(BaseDataset):
                 "public data set",
                 "steady-state visual evoked potential (SSVEP)",
             ],
-            repository="BNCI Horizon 2020",
+            repository="Zenodo (mirror of the Tsinghua BCI lab release)",
             data_url="http://bci.med.tsinghua.edu.cn/download.html",
             license="CC-BY-4.0",
         ),
@@ -434,7 +434,7 @@ class Wang2016(BaseDataset):
 
     def __init__(self, subjects=None, sessions=None):
         super().__init__(
-            subjects=list(range(1, 35)),
+            subjects=list(range(1, 36)),
             sessions_per_subject=1,
             events=self._events,
             code="Wang2016",

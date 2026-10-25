@@ -211,6 +211,7 @@ def _nguyen_docs(keywords_suffix, description):
         repository="Zenodo",
         senior_author="Panagiotis Artemiadis",
         contact_info=["chuong.h.nguyen@asu.edu", "panagiotis.artemiadis@asu.edu"],
+        ethics_approval=["ASU IRB (Protocols: 1309009601, STUDY00001345)"],
         associated_paper_doi=_DOI,
         keywords=[
             "imagined speech",
@@ -350,6 +351,7 @@ class Nguyen2017_V(_Nguyen2017Base):
     """Nguyen 2017 Imagined Speech - Vowels condition."""
 
     nemar_id = "nm000261"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=_NGUYEN_ACQUISITION,
         participants=_nguyen_participants(8),
@@ -422,6 +424,7 @@ class Nguyen2017_S(_Nguyen2017Base):
     """Nguyen 2017 Imagined Speech - Short Words condition."""
 
     nemar_id = "nm000257"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=_NGUYEN_ACQUISITION,
         participants=_nguyen_participants(6),
@@ -479,6 +482,7 @@ class Nguyen2017_L(_Nguyen2017Base):
     """Nguyen 2017 Imagined Speech - Long Words condition."""
 
     nemar_id = "nm000252"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=_NGUYEN_ACQUISITION,
         participants=_nguyen_participants(6),
@@ -535,6 +539,7 @@ class Nguyen2017_SL(_Nguyen2017Base):
     """Nguyen 2017 Imagined Speech - Short vs Long Words condition."""
 
     nemar_id = "nm000224"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=_NGUYEN_ACQUISITION,
         participants=_nguyen_participants(6),

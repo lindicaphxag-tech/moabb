@@ -229,7 +229,7 @@ def _convert_run_001_2024(run, verbose=None):
 
 
 class BNCI2024_001(BNCIBaseDataset):
-    """BNCI 2024-001 Handwritten Character Classification dataset.
+    """BNCI 2024-001 Handwritten Character Classification dataset (cognitive paradigm).
 
     Dataset from [1]_.
 
@@ -400,7 +400,7 @@ class BNCI2024_001(BNCIBaseDataset):
                 "letter_t": 9,
                 "letter_v": 10,
             },
-            paradigm="imagery",
+            paradigm="cognitive",
             task_type="handwriting",
             n_classes=10,
             class_labels=[
@@ -437,7 +437,7 @@ class BNCI2024_001(BNCIBaseDataset):
             description="Classification of handwritten letters from EEG through continuous kinematic decoding",
             investigators=["Markus R. Crell", "Gernot R. Müller-Putz"],
             institution="Graz University of Technology",
-            country="Austria",
+            country="AT",
             repository="BNCI Horizon 2020",
             publication_year=2024,
             senior_author="Gernot R. Müller-Putz",
@@ -513,7 +513,7 @@ class BNCI2024_001(BNCIBaseDataset):
             online_feedback=False,
         ),
         paradigm_specific=ParadigmSpecificMetadata(
-            detected_paradigm="motor_imagery_handwriting",
+            detected_paradigm="cognitive",
             imagery_tasks=["handwriting of letters a, d, e, f, j, n, o, s, t, v"],
             cue_duration_s=2.0,
             imagery_duration_s=4.0,
@@ -521,7 +521,7 @@ class BNCI2024_001(BNCIBaseDataset):
         data_structure=DataStructureMetadata(
             n_trials=60, trials_context="per_class", n_blocks=15, block_duration_s=340
         ),
-        sessions_per_subject=2,
+        sessions_per_subject=1,
         runs_per_session=2,
         file_format="MAT",
         data_processed=False,
@@ -548,7 +548,7 @@ class BNCI2024_001(BNCIBaseDataset):
             },
             code="BNCI2024-001",
             interval=[0, 3],
-            paradigm="imagery",
+            paradigm="cognitive",
             doi="10.1016/j.compbiomed.2024.109132",
             load_fn=_load_data_001_2024,
             base_url=BNCI_URL,

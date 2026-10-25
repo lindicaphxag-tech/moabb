@@ -26,8 +26,18 @@ from typing import TYPE_CHECKING, Dict, Type
 
 import mne
 import mne_bids
-import pandas as pd
-from mne_bids._fileio import _open_lock as _bids_lock
+
+
+try:
+    from mne_bids._fileio import _open_lock as _bids_lock
+except ImportError:  # pragma: no cover - defensive fallback
+    import contextlib
+
+    @contextlib.contextmanager
+    def _bids_lock(_path):
+        yield
+
+
 from numpy import load as np_load
 from numpy import save as np_save
 
@@ -631,17 +641,28 @@ def _build_sidecar_enrichment(metadata):
         if hw_filters:
             entries["HardwareFilters"] = hw_filters
 
-    # HardwareFilters fallback: use acq.filters when prep filters are absent
+    # HardwareFilters fallback: use acq.filters when prep filters are absent.
+    # The @bids/validator v2 schema requires every top-level value of
+    # HardwareFilters to be an object (or the whole field to be the string
+    # "n/a"), so free-text or flat dicts must be nested.
     if "HardwareFilters" not in entries and acq and acq.filters:
         if isinstance(acq.filters, dict):
-            # BIDS requires nested structure: {"FilterName": {"key": "value"}}
-            # If the dict is flat (no nested dicts), wrap it under a filter name.
-            if acq.filters and not any(isinstance(v, dict) for v in acq.filters.values()):
-                entries["HardwareFilters"] = {"HardwareFilter": acq.filters}
-            else:
+            if acq.filters and all(isinstance(v, dict) for v in acq.filters.values()):
+                # Already nested ({"Bandpass": {...}, "Notch": {...}}): keep as-is.
                 entries["HardwareFilters"] = acq.filters
+            else:
+                # Flat dict with non-dict values: wrap under a single
+                # ``HardwareFilter`` key whose value is itself an object.
+                # Values are stringified to keep the sub-object JSON-friendly.
+                entries["HardwareFilters"] = {
+                    "HardwareFilter": {k: str(v) for k, v in acq.filters.items()}
+                }
         else:
-            entries["HardwareFilters"] = {"HardwareFilter": str(acq.filters)}
+            # Free-text description: wrap under Description so the
+            # ``HardwareFilter`` value is an object as the schema requires.
+            entries["HardwareFilters"] = {
+                "HardwareFilter": {"Description": str(acq.filters)}
+            }
 
     # HardwareFilters (RECOMMENDED) — "n/a" when not described
     entries.setdefault("HardwareFilters", "n/a")
@@ -959,7 +980,7 @@ def _update_participants_tsv_locked(tsv_path, root, subject, participants, raw):
     json_path = Path(root) / "participants.json"
     sidecar = {}
     if json_path.exists():
-        with open(json_path) as f:
+        with open(json_path, encoding="utf-8") as f:
             sidecar = json.load(f)
 
     updated = False
@@ -1010,25 +1031,13 @@ def _update_participants_tsv_locked(tsv_path, root, subject, participants, raw):
             "Description": "BCI experience level of the participant"
         }
         updated = True
-    # Ensure mne_bids-generated columns have Description (RECOMMENDED)
-    if "participant_id" not in sidecar:
-        sidecar["participant_id"] = {"Description": "Unique participant identifier"}
-        updated = True
-    if "weight" not in sidecar:
-        sidecar["weight"] = {
-            "Description": "Body weight of the participant",
-            "Units": "kg",
-        }
-        updated = True
-    if "height" not in sidecar:
-        sidecar["height"] = {
-            "Description": "Body height of the participant",
-            "Units": "m",
-        }
-        updated = True
+    # ``participant_id``, ``weight``, ``height``, ``sex`` and ``hand`` get
+    # Description/Units entries from mne-bids 0.19+'s ``_participants_json``
+    # writer (see mne-bids :gh:`1545`), so MOABB only enriches its own
+    # extension columns above.
 
     if updated:
-        with open(json_path, "w") as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(sidecar, f, indent="\t")
 
 
@@ -1089,7 +1098,7 @@ def _update_electrodes_tsv(bids_path, metadata):
             changed = True
 
         if changed:
-            with open(tsv_path, "w", newline="") as f:
+            with open(tsv_path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
                 writer.writeheader()
                 writer.writerows(rows)
@@ -1175,7 +1184,7 @@ def _update_events_json_sidecar(bids_path, hed_tags, metadata):
     if not events_json_path.exists():
         return
 
-    with open(events_json_path) as f:
+    with open(events_json_path, encoding="utf-8") as f:
         sidecar = json.load(f)
 
     changed = False
@@ -1238,7 +1247,7 @@ def _update_events_json_sidecar(bids_path, hed_tags, metadata):
             changed = True
 
     if changed:
-        with open(events_json_path, "w") as f:
+        with open(events_json_path, "w", encoding="utf-8") as f:
             json.dump(sidecar, f, indent="\t")
 
 
@@ -1271,14 +1280,14 @@ def _update_dataset_description_extra(root, metadata):
     # Lock the read-modify-write so concurrent per-subject workers
     # (get_data(n_jobs>1)) can't read a half-written file or clobber each other.
     with _bids_lock(desc_path):
-        with open(desc_path) as f:
+        with open(desc_path, encoding="utf-8") as f:
             desc = json.load(f)
 
         if "PublicationYear" in desc:
             return
         desc["PublicationYear"] = doc.publication_year
 
-        with open(desc_path, "w") as f:
+        with open(desc_path, "w", encoding="utf-8") as f:
             json.dump(desc, f, indent="\t")
 
 
@@ -2143,21 +2152,60 @@ def subject_bids_to_moabb(subject: str):
     return int(subject)
 
 
+# mne-bids reserves ``acq-calibration`` and ``acq-crosstalk`` for MEG
+# fine-calibration/crosstalk sidecar files (``acq-<magic>_meg.json``) and
+# rejects any BIDSPath that pairs one of these values with a non-empty
+# ``task`` (see ``mne_bids.path.BIDSPath._check``). MOABB dataset loaders
+# (Wang2025, Leeuwis2021, Brandl2020, Romani_BF2025_ERP, …) carry run labels
+# whose non-numeric suffix is literally ``"calibration"``, which collides
+# with that reservation once the description is routed through ``acq-``.
+# We map the two reserved tokens to short, mne-bids-safe aliases on write
+# and invert the mapping on read so the round trip stays exact for every
+# label currently emitted by any loader on develop.
+_RESERVED_ACQ_WRITE = {"calibration": "calib", "crosstalk": "xtalk"}
+_RESERVED_ACQ_READ = {v: k for k, v in _RESERVED_ACQ_WRITE.items()}
+
+
 def run_moabb_to_bids(run: str):
-    """Convert the run to run index plus eventually description."""
+    """Convert the run to run index plus eventually description.
+
+    MOABB run labels can carry a non-numeric suffix (e.g. ``"1feedback1"``,
+    ``"3A"``). That suffix is stored in the BIDS ``acquisition`` (``acq-``)
+    entity, which is valid for ``_eeg``/``_events``/``_channels`` files.
+
+    Older MOABB versions used the ``recording`` (``rec-``) entity, which
+    the official bids-validator rejects for EEG core files
+    (``ALL_FILENAME_RULES_HAVE_ISSUES``). ``run_bids_to_moabb`` still
+    accepts caches written with ``recording-`` for backwards compatibility.
+
+    The two mne-bids reserved tokens ``"calibration"`` and ``"crosstalk"``
+    are rewritten to safe aliases (``"calib"`` / ``"xtalk"``) so a BIDSPath
+    with the usual ``task-<paradigm>`` entity validates; the inverse
+    mapping is applied on read to keep the round trip exact.
+    """
     p = r"([0-9]+)(|[a-zA-Z]+[a-zA-Z0-9]*)"
     idx, desc = re.fullmatch(p, run).groups()
     out = {"run": idx}
     if desc:
-        out["recording"] = desc
+        out["acquisition"] = _RESERVED_ACQ_WRITE.get(desc, desc)
     return out
 
 
 def run_bids_to_moabb(path: mne_bids.BIDSPath):
-    """Extracts the run index plus eventually description from a path."""
-    if path.recording is None:
+    """Extracts the run index plus eventually description from a path.
+
+    Accepts both the new ``acq-`` entity (written by current MOABB) and the
+    legacy ``rec-`` entity (written by older MOABB versions) so pre-existing
+    caches keep reading back to the same MOABB run label. Inverts the
+    reserved-token rewrite applied by ``run_moabb_to_bids`` so an
+    ``acq-calib`` written by current MOABB round-trips back to a MOABB run
+    label ending in ``calibration``.
+    """
+    desc = path.acquisition if path.acquisition is not None else path.recording
+    if desc is None:
         return path.run
-    return f"{path.run}{path.recording}"
+    desc = _RESERVED_ACQ_READ.get(desc, desc)
+    return f"{path.run}{desc}"
 
 
 @dataclass
@@ -2568,16 +2616,13 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
         # is already equipped with annotations, which will be converted to
         # BIDS events automatically.
 
-        # Suppress mne_bids informational warnings about format conversion.
-        # "Converting data files to EDF format" — we explicitly request the
-        # format via self._format, so this is expected.
-        # "Encountered data in "double" format" — mne_bids internally handles
-        # the float64->float32 downcast for EDF; we cannot pre-convert because
-        # MNE Epochs.save() requires float64 data.
+        # Suppress mne_bids / MNE informational warning about float64 data.
+        # mne-bids 0.19+ downgraded the "Converting data files to <FORMAT>"
+        # notice to info-level, so no filter is needed for that line anymore.
+        # The "Encountered data in "double" format" warning still comes from
+        # mne-core's EDF export (float64->float32 downcast); we cannot
+        # pre-convert because MNE Epochs.save() requires float64 data.
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", "Converting data files to EDF", RuntimeWarning
-            )
             warnings.filterwarnings(
                 "ignore", 'Encountered data in "double" format', RuntimeWarning
             )
@@ -2616,11 +2661,9 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
                         )
                         raw.set_montage(None)
 
-            # Save annotation extras before write_raw_bids (which may
-            # strip them).  We patch events.tsv afterwards.
-            ann_extras = getattr(raw.annotations, "extras", None)
-            has_extras = ann_extras is not None and any(ann_extras)
-
+            # mne-bids >= 0.19 serialises ``raw.annotations.extras`` natively
+            # into events.tsv (see mne-bids :gh:`1502`), so no post-patch is
+            # needed anymore.
             mne_bids.write_raw_bids(
                 raw,
                 bids_path,
@@ -2628,28 +2671,9 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
                 allow_preload=True,
                 montage=raw.get_montage(),
                 overwrite=True,
+                readme=False,  # MOABB writes its own enriched README below.
                 verbose=self.verbose,
             )
-
-            # Append per-event metadata from annotation extras (e.g.
-            # triallength for Stieger2021) as extra columns in events.tsv.
-            if has_extras:
-                events_path = bids_path.copy().update(suffix="events", extension=".tsv")
-                events_fpath = events_path.fpath
-                if events_fpath.exists():
-                    df = pd.read_csv(str(events_fpath), sep="\t")
-                    extras_df = pd.DataFrame(ann_extras)
-                    if len(extras_df) == len(df):
-                        for col in extras_df.columns:
-                            df[col] = extras_df[col]
-                        df.to_csv(str(events_fpath), sep="\t", index=False, na_rep="n/a")
-                    else:
-                        log.warning(
-                            "Annotation extras length (%d) does not match "
-                            "events.tsv rows (%d); skipping extras.",
-                            len(extras_df),
-                            len(df),
-                        )
 
         # Post-write enrichment: update EEG sidecar with metadata fields
         if metadata is not None:
@@ -2657,16 +2681,6 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
             if sidecar_entries:
                 sidecar_path = bids_path.copy().update(extension=".json")
                 mne_bids.update_sidecar_json(sidecar_path, sidecar_entries)
-
-            # Fix mne_bids key casing: MiscChannelCount → MISCChannelCount
-            sidecar_fpath = bids_path.copy().update(extension=".json").fpath
-            if sidecar_fpath.exists():
-                with open(sidecar_fpath) as f:
-                    sc = json.load(f)
-                if "MiscChannelCount" in sc and "MISCChannelCount" not in sc:
-                    sc["MISCChannelCount"] = sc.pop("MiscChannelCount")
-                    with open(sidecar_fpath, "w") as f:
-                        json.dump(sc, f, indent="\t")
 
             # Patch participants.tsv with demographic data
             _update_participants_tsv(bids_path.root, self.subject, metadata, raw=raw)
@@ -2681,7 +2695,7 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
         FIFF = mne.io.constants.FIFF
         coordsystem_files = list(bids_path.root.rglob("*_coordsystem.json"))
         for cs_path in coordsystem_files:
-            with open(cs_path) as f:
+            with open(cs_path, encoding="utf-8") as f:
                 cs = json.load(f)
             if "FiducialsCoordinates" not in cs:
                 montage = raw.get_montage() if raw is not None else None
@@ -2704,7 +2718,7 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
                         "FiducialsCoordinateSystem",
                         cs.get("EEGCoordinateSystem", "CapTrak"),
                     )
-                    with open(cs_path, "w") as f:
+                    with open(cs_path, "w", encoding="utf-8") as f:
                         json.dump(cs, f, indent="\t")
 
         # Enrich events.json sidecar with HED annotations and stimulus info
@@ -2724,7 +2738,7 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
                     "filename": {"Description": "Relative path to the data file."},
                     "acq_time": {"Description": "Acquisition date and time."},
                 }
-                with open(scans_json_path, "w") as f:
+                with open(scans_json_path, "w", encoding="utf-8") as f:
                     json.dump(scans_sidecar, f, indent="\t")
 
         # Create channels.json sidecar (Description RECOMMENDED)
@@ -2761,7 +2775,7 @@ class BIDSInterfaceRawEDF(BIDSInterfaceBase):
                                 + "."
                             )
                 channels_sidecar = {"Description": channels_desc}
-                with open(channels_json_path, "w") as f:
+                with open(channels_json_path, "w", encoding="utf-8") as f:
                     json.dump(channels_sidecar, f, indent="\t")
 
 
@@ -2820,8 +2834,7 @@ class BIDSInterfaceNumpyArray(BIDSInterfaceBase):
     def _load_file(self, bids_path, preload):
         if preload:
             raise ValueError("preload must be False for numpy arrays")
-        events_fname = mne_bids.write._find_matching_sidecar(
-            bids_path,
+        events_fname = bids_path.find_matching_sidecar(
             suffix="events",
             extension=".eve",  # mne convention
             on_error="raise",

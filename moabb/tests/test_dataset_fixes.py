@@ -13,9 +13,11 @@ from moabb.datasets import download as _dl
 from moabb.datasets import schirrmeister2017
 from moabb.datasets.bnci.bnci_2020 import _convert_attention_shift
 from moabb.datasets.braininvaders import BI2015b
+from moabb.datasets.fake import FakeDataset
 from moabb.datasets.hefmi_ich2025 import HefmiIch2025
 from moabb.datasets.kaneshiro2015 import Kaneshiro2015
 from moabb.datasets.kojima2024a import Kojima2024A
+from moabb.datasets.lenaig2026 import Lenaig2026
 from moabb.datasets.mainsah2025 import _parse_manifest
 from moabb.datasets.schirrmeister2017 import Schirrmeister2017
 from moabb.datasets.ssvep_chen2017 import Chen2017SingleFlicker
@@ -205,7 +207,7 @@ def test_hefmi_ich_data_path_downloads_subject_files(tmp_path: Path, monkeypatch
         "moabb.datasets.hefmi_ich2025._MANIFEST", {1: [(42, "sub01_1_epo.mat")]}
     )
 
-    def fake_download(url, sign, root, force_update, verbose):
+    def fake_download(url, sign, root, force_update, verbose, fname=None):
         downloaded = tmp_path / "MNE-hefmiich2025-data" / "42"
         downloaded.write_bytes(b"data")
         return downloaded
@@ -316,3 +318,189 @@ def test_kaneshiro2015_valid_for_declared_paradigm():
         assert paradigm.used_events(dataset) == dataset.event_id
     # The old declaration was broken: P300 requires Target/NonTarget.
     assert not P300().is_valid(dataset)
+
+
+def test_lenaig2026_data_path_accepts_wrapped_and_flat_layouts(tmp_path, monkeypatch):
+    """data_path() assumed the extracted RAR always sits under an
+    ``EEG_24Chan_AudioStim/`` wrapper directory, but the current Zenodo v2
+    archive (record 21156618) extracts ``EXP1/``/``EXP2/`` directly at the
+    root -- confirmed by direct inspection on Voyager. The loader must find
+    the files either way, without touching events/labels."""
+    import moabb.datasets.lenaig2026 as lenaig2026_mod
+
+    def make_tree(root):
+        for run in (1, 2):
+            run_dir = root / "EXP1" / "S1" / f"R{run}"
+            run_dir.mkdir(parents=True)
+            (run_dir / f"01_R{run}.gdf").write_bytes(b"")
+
+    # Flat layout: EXP1/ directly at the extraction root (current archive).
+    flat_root = tmp_path / "flat" / "MNE-Lenaig2026-data"
+    make_tree(flat_root)
+    monkeypatch.setattr(
+        lenaig2026_mod.dl, "get_dataset_path", lambda *a, **k: str(tmp_path / "flat")
+    )
+    paths = Lenaig2026(exp=1, run="both").data_path(1)
+    assert [Path(p).name for p in paths] == ["01_R1.gdf", "01_R2.gdf"]
+    assert all(Path(p).is_file() for p in paths)
+
+    # Wrapped layout: EXP1/ under EEG_24Chan_AudioStim/ (what the loader
+    # originally -- and exclusively -- assumed).
+    wrapped_root = tmp_path / "wrapped" / "MNE-Lenaig2026-data"
+    make_tree(wrapped_root / "EEG_24Chan_AudioStim")
+    monkeypatch.setattr(
+        lenaig2026_mod.dl, "get_dataset_path", lambda *a, **k: str(tmp_path / "wrapped")
+    )
+    paths2 = Lenaig2026(exp=1, run="both").data_path(1)
+    assert [Path(p).name for p in paths2] == ["01_R1.gdf", "01_R2.gdf"]
+    assert all(Path(p).is_file() for p in paths2)
+
+
+def test_convert_to_bids_skips_subject_with_no_usable_data(tmp_path, monkeypatch, caplog):
+    """gh: Schrag2026Pediatric subject 16 has a single game recording whose
+    only run is dropped by the >10%% drift policy, leaving zero usable runs;
+    _get_single_subject_data correctly raises FileNotFoundError for that one
+    subject (a loader's own "nothing to write" signal). Before this fix,
+    convert_to_bids's per-subject loop had no try/except around
+    self.get_data(), so that single subject's FileNotFoundError aborted the
+    whole multi-subject convert, losing every subject not yet processed.
+    convert_to_bids must now skip that subject (with a warning) and keep
+    converting the rest."""
+    from moabb.datasets.base import BaseDataset
+
+    dataset = FakeDataset(event_list=["fake1", "fake2"], n_sessions=1, n_subjects=3)
+    real_get_data = BaseDataset.get_data
+
+    def flaky_get_data(self, subjects=None, **kwargs):
+        if subjects == [2]:
+            raise FileNotFoundError("subject 2: no usable runs after drift policy")
+        return real_get_data(self, subjects=subjects, **kwargs)
+
+    monkeypatch.setattr(FakeDataset, "get_data", flaky_get_data)
+
+    with caplog.at_level("WARNING"):
+        bids_root = dataset.convert_to_bids(path=tmp_path, subjects=[1, 2, 3])
+
+    assert any("skipping subject" in record.message for record in caplog.records), (
+        "a warning naming the skipped subject must be logged"
+    )
+    subjects_found = {f.parent.parent.parent.name for f in bids_root.rglob("*.edf")}
+    assert subjects_found == {"sub-1", "sub-3"}, "subject 2 must be skipped, not abort"
+
+
+def test_lenaig2026_trials_per_class_builds_a_readme(tmp_path):
+    """gh: METADATA.experiment.trials_per_class was a bare int (``10``),
+    violating the schema's declared ``Dict[str, int]`` type. A real
+    end-to-end convert crashed in ``bids_interface._build_readme`` with
+    ``AttributeError: 'int' object has no attribute 'items'`` because
+    ``_format_dict`` assumes a mapping. It is now a per-class dict; the
+    README builder must run without crashing."""
+    from moabb.datasets.bids_interface import _build_readme
+
+    dataset = Lenaig2026(exp=1, run="both")
+    assert isinstance(dataset.METADATA.experiment.trials_per_class, dict)
+    readme = _build_readme(dataset)
+    assert "Trials per class" in readme
+
+
+def test_schrag2026_skips_run_with_zero_annotations_after_high_drift(
+    tmp_path, monkeypatch, caplog
+):
+    """gh: subject 1's personal-stimulus game run has >10%% Trial/CSV drift,
+    so ``_load_game_run``'s documented policy drops every label, returning a
+    zero-annotation Raw. ``bids_interface._write_file`` hard-requires every
+    Raw to carry annotations, so writing that Raw crashes the whole convert.
+    ``_get_single_subject_data`` must skip (not return) a zero-annotation
+    run, with a warning naming the subject and run, instead of crashing
+    downstream."""
+    import mne
+    import numpy as np
+
+    from moabb.datasets import schrag2026
+    from moabb.datasets.schrag2026 import Schrag2026Pediatric
+
+    eeg_dir = tmp_path / "P001" / "EEG"
+    eeg_dir.mkdir(parents=True)
+    std_name = "sub-P001_ses-S001_task-T2_acq-BW_M1_run-001_eeg.xdf"
+    pers_name = "sub-P001_ses-S001_task-T3_acq-C3S1_M2_run-001_eeg.xdf"
+    (eeg_dir / std_name).write_bytes(b"")
+    (eeg_dir / pers_name).write_bytes(b"")
+
+    info = mne.create_info(["Fz"], 256.0, "eeg")
+
+    def fake_load_game_run(path):
+        raw = mne.io.RawArray(np.zeros((1, 10)), info, verbose=False)
+        if path.name == pers_name:
+            return raw  # the >10%% drift run: zero annotations
+        raw.set_annotations(
+            mne.Annotations(onset=[0.0], duration=[5.0], description=["6.25"])
+        )
+        return raw
+
+    monkeypatch.setattr(schrag2026, "_load_game_run", fake_load_game_run)
+    dataset = Schrag2026Pediatric()
+    monkeypatch.setattr(dataset, "data_path", lambda *a, **k: str(tmp_path / "P001"))
+
+    with caplog.at_level("WARNING"):
+        session = dataset._get_single_subject_data(1)
+
+    runs = session["0"]
+    assert set(runs) == {"0standard"}, "the zero-annotation run must be skipped"
+    assert len(runs["0standard"].annotations) == 1
+    assert any(
+        "zero labelled trials" in record.message and "1personal" in record.message
+        for record in caplog.records
+    ), "a warning naming the subject/run must be logged"
+
+
+def test_rozado2015_picks_scalp_channels_by_label_in_microvolts(monkeypatch):
+    """Rozado2015 (#1070): channel 0 of the BioSemi stream is ``Trig1``.
+
+    The loader took the first 32 channels by position (trigger served as Fp1,
+    every label shifted, Cz dropped) and scaled microvolts as ADC counts.
+    """
+    from moabb.datasets import rozado2015
+    from moabb.datasets.rozado2015 import Rozado2015
+
+    scalp = list(Rozado2015._ch_names)
+    labels = ["Trig1"] + scalp + [f"EX{i}" for i in range(1, 9)]
+    n_times = 2048
+    ts = 100.0 + np.arange(n_times) / 512.0
+    # channel k (scalp k-1) holds a constant k microvolts; Trig1 a huge code
+    data = np.tile(np.arange(len(labels), dtype=np.float32), (n_times, 1))
+    data[:, 0] = 7697260.0
+    channels = [{"label": [lab], "unit": ["microvolts"]} for lab in labels]
+    eeg = {
+        "info": {
+            "type": ["EEG"],
+            "nominal_srate": ["512"],
+            "channel_count": [str(len(labels))],
+            "desc": [{"channels": [{"channel": channels}]}],
+        },
+        "time_series": data,
+        "time_stamps": ts,
+    }
+    markers = {
+        "info": {"type": ["Markers"]},
+        "time_series": [["229"], ["left"], ["nothing"], ["experiment_end"]],
+        "time_stamps": np.array([100.1, 101.0, 102.0, 103.0]),
+    }
+    monkeypatch.setattr(rozado2015, "read_xdf", lambda path: ([markers, eeg], {}))
+
+    raw = Rozado2015()._load_xdf_run("experiment.xdf")
+
+    assert raw.ch_names == scalp + ["stim"]
+    values = raw.get_data()
+    np.testing.assert_allclose(values[:32, 0] * 1e6, np.arange(1, 33), rtol=1e-6)
+    assert values[scalp.index("Cz"), 0] == pytest.approx(32e-6)
+    stim = values[32]
+    assert np.flatnonzero(stim).tolist() == [512, 1024]
+    assert stim[512] == 1 and stim[1024] == 2
+
+    channels[5]["unit"] = ["counts"]
+    with pytest.raises(ValueError, match="Unexpected EEG units"):
+        Rozado2015()._load_xdf_run("experiment.xdf")
+    channels[5]["unit"] = ["microvolts"]
+    channels[labels.index("Cz")]["label"] = ["A32"]
+    with pytest.raises(ValueError, match="lacks channels"):
+        Rozado2015()._load_xdf_run("experiment.xdf")

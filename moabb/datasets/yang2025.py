@@ -66,9 +66,18 @@ class Yang2025(BaseDataset):
     (59 EEG + 1 ECG + 4 EOG) across 3 sessions on different days.
     Two paradigms were used:
 
-    - **2C paradigm** (subjects 1-51): left hand vs right hand MI
-    - **3C paradigm** (subjects 52-62): left hand, right hand, and
+    - **2C paradigm** (51 subjects): left hand vs right hand MI
+    - **3C paradigm** (11 subjects): left hand, right hand, and
       foot-hooking MI
+
+    Both paradigms number their subjects from 1 in the release ("xxx
+    represents for the subject number (2 C dataset: 001, 002, ..., 051;
+    3 C dataset: 001, 002, ..., 011)" [1]_), so ``Yang2025(paradigm_type="3C")``
+    exposes subjects 1-11, not 52-62. The participant statistics in
+    ``METADATA`` describe the whole cohort ("62 healthy, right-handed
+    participants (aged 17-30, including 18 females), all naive BCI users"
+    [1]_); the paper does not split them per paradigm, while ``n_subjects``
+    follows the default 2C loader (51).
 
     Each session contains 5 blocks of 40 trials (2C) or 60 trials
     (3C), giving 200 or 300 trials per session.
@@ -100,6 +109,7 @@ class Yang2025(BaseDataset):
     """
 
     nemar_id = "nm000348"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=AcquisitionMetadata(
             sampling_rate=1000.0,
@@ -112,7 +122,7 @@ class Yang2025(BaseDataset):
             line_freq=50.0,
         ),
         participants=ParticipantMetadata(
-            n_subjects=62,
+            n_subjects=51,
             health_status="healthy",
             gender={"female": 18, "male": 44},
             age_min=17.0,
@@ -248,16 +258,21 @@ class Yang2025(BaseDataset):
             self._ANNOT_MAP_3C if self.paradigm_type == "3C" else self._ANNOT_MAP_2C
         )
 
-        # Find the BIDS root (contains "sourcedata" folder)
-        bids_root = None
+        # Find the BIDS root (contains "sourcedata" folder). A seeded NEMAR
+        # store mirrors the contents of that "sourcedata" folder directly
+        # (``2C dataset/...``), without the extra level, so accept both.
+        source_dir = None
         for candidate in [base, *base.iterdir()]:
-            if candidate.is_dir() and (candidate / "sourcedata").exists():
-                bids_root = candidate
+            if not candidate.is_dir():
+                continue
+            for root in (candidate / "sourcedata", candidate):
+                if (root / f"{self.paradigm_type} dataset").is_dir():
+                    source_dir = root / f"{self.paradigm_type} dataset" / subj_str
+                    break
+            if source_dir is not None:
                 break
-        if bids_root is None:
+        if source_dir is None:
             raise FileNotFoundError(f"No BIDS root with sourcedata in {base}")
-
-        source_dir = bids_root / "sourcedata" / f"{self.paradigm_type} dataset" / subj_str
 
         sessions = {}
         for sess_idx in range(1, 4):

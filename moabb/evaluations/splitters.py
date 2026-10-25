@@ -1,4 +1,5 @@
 import inspect
+import json
 import logging
 from dataclasses import dataclass
 from typing import Optional, Union
@@ -52,6 +53,40 @@ def _cv_keyword_capability(cv_class, name):
         parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in parameters.values()
     )
+
+
+def _is_metadata_splitter(cv_class):
+    """Return whether ``cv_class`` is a metadata-aware top-level splitter.
+
+    Such a splitter declares ``metadata_columns`` and implements
+    ``split(self, y, metadata)``. It owns the whole fold (including rows it
+    leaves out of both train and test), so it is called directly instead of
+    being wrapped as the inner groups-CV.
+    """
+    if not hasattr(cv_class, "metadata_columns"):
+        return False
+    try:
+        parameters = inspect.signature(cv_class.split).parameters
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return "metadata" in parameters
+
+
+def _check_groups_unused(cv_class, groups, default):
+    """Reject a non-default ``groups`` for a metadata-aware ``cv_class``.
+
+    Such a splitter owns the whole fold and is called as
+    ``split(y, metadata)``, so ``groups`` would be silently ignored.
+    """
+    if _is_metadata_splitter(cv_class) and not (
+        isinstance(groups, str) and groups == default
+    ):
+        raise ValueError(
+            f"groups={groups!r} is not used when cv_class "
+            f"({getattr(cv_class, '__name__', cv_class)}) is a metadata-aware "
+            "splitter: it receives the full metadata and defines the folds "
+            "itself. Remove the groups argument."
+        )
 
 
 def _resolved_inner_kwargs(cv_class, direct_kwargs, resolved, control_keys):
@@ -112,7 +147,13 @@ def _resolve_groups(groups, metadata):
     if callable(groups):
         return np.asarray(groups(metadata))
     if isinstance(groups, (list, tuple)):
-        return metadata[list(groups)].astype(str).agg("-".join, axis=1).to_numpy()
+        values = metadata[list(groups)].astype(str)
+        return np.asarray(
+            [
+                json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                for row in values.itertuples(index=False, name=None)
+            ]
+        )
     return metadata[groups].to_numpy()
 
 
@@ -524,7 +565,11 @@ class CrossSessionSplitter(BaseCrossValidator):
     cv_class : type
         Inner cross-validation strategy for splitting the sessions of one subject.
         LeaveOneGroupOut is the most common default.
-        Defaults to ``LeaveOneGroupOut``.
+        Defaults to ``LeaveOneGroupOut``. A metadata-aware splitter (with
+        ``metadata_columns`` and ``split(y, metadata)``) is called directly on
+        the metadata it is given; note that
+        :class:`~moabb.evaluations.CrossSessionEvaluation` loads one subject at
+        a time, so such a splitter only ever sees one subject's rows there.
     shuffle : bool
         Whether to shuffle the session order for each subject. It can only be
         used when changing the `cv_class` to a class compatible with `shuffle`.
@@ -570,6 +615,7 @@ class CrossSessionSplitter(BaseCrossValidator):
         self.cv_class = cv_class
         # ``groups`` is the within-subject held-out axis (default: sessions),
         # resolved per subject and fed to the stock sklearn cv_class.
+        _check_groups_unused(cv_class, groups, default="session")
         self.groups = groups
         control_keys = {"shuffle", "random_state"}
         self.cv_kwargs = _public_cv_kwargs(cv_kwargs, resolved_cv, control_keys)
@@ -633,6 +679,8 @@ class CrossSessionSplitter(BaseCrossValidator):
         n_splits: int
             The number of splits for the cross-validation
         """
+        if _is_metadata_splitter(self.cv_class):
+            return self.cv_class(**self._cv_kwargs).get_n_splits(metadata)
         subjects = metadata["subject"].unique()
         n_splits = 0
         for subject in subjects:  # noqa: B007 — referenced via @subject in pandas query below
@@ -665,6 +713,14 @@ class CrossSessionSplitter(BaseCrossValidator):
         cv_kwargs = {**self._cv_kwargs}  # Copy the original kwargs
         if self._need_rng:
             cv_kwargs["random_state"] = check_random_state(self.random_state)
+
+        if _is_metadata_splitter(self.cv_class):
+            # A metadata-aware splitter owns the whole fold: call it directly.
+            splitter = self.cv_class(**cv_kwargs)
+            for train_idx, test_idx in splitter.split(y, metadata):
+                self._last_split_metadata = _splitter_metadata(splitter)
+                yield all_index[train_idx], all_index[test_idx]
+            return
 
         # For each subject I am creating the mask to select the subject metainformation.
         for subject in subjects:
@@ -791,6 +847,7 @@ class CrossSubjectSplitter(BaseCrossValidator):
         # ``groups`` selects what defines a fold: a metadata column ("subject"),
         # a list of columns (["subject", "session"]), or a callable
         # ``metadata -> array``. Fed straight to the stock sklearn cv_class.
+        _check_groups_unused(cv_class, groups, default="subject")
         self.groups = groups
         self.calibration_size = calibration_size
         self.calibration_labeled = calibration_labeled
@@ -836,6 +893,8 @@ class CrossSubjectSplitter(BaseCrossValidator):
             The number of splits for the cross-validation
         """
 
+        if _is_metadata_splitter(self.cv_class):
+            return self.cv_class(**self._cv_kwargs).get_n_splits(metadata)
         splitter = self.cv_class(**_materialize_cv_kwargs(self._cv_kwargs, metadata))
         get_n_splits_kwargs = {"X": metadata.index}
         if self._cv_uses_groups:
@@ -847,17 +906,23 @@ class CrossSubjectSplitter(BaseCrossValidator):
         # here, I am getting the index across all the subject
         all_index = metadata.index.values
 
-        splitter = self.cv_class(**_materialize_cv_kwargs(self._cv_kwargs, metadata))
         self._last_split_metadata = None
+        if _is_metadata_splitter(self.cv_class):
+            # A metadata-aware splitter owns the whole fold (it may leave rows
+            # out of both train and test): call it directly.
+            splitter = self.cv_class(**self._cv_kwargs)
+            folds = splitter.split(y, metadata)
+        else:
+            splitter = self.cv_class(**_materialize_cv_kwargs(self._cv_kwargs, metadata))
+            # Only pass groups to cv_classes that actually use them
+            # (detected via GroupsConsumerMixin). This avoids the
+            # "The groups parameter is ignored" warning from e.g. TimeSeriesSplit.
+            split_kwargs = {"X": all_index, "y": y}
+            if self._cv_uses_groups:
+                split_kwargs["groups"] = _resolve_groups(self.groups, metadata)
+            folds = splitter.split(**split_kwargs)
 
-        # Only pass groups to cv_classes that actually use them
-        # (detected via GroupsConsumerMixin). This avoids the
-        # "The groups parameter is ignored" warning from e.g. TimeSeriesSplit.
-        split_kwargs = {"X": all_index, "y": y}
-        if self._cv_uses_groups:
-            split_kwargs["groups"] = _resolve_groups(self.groups, metadata)
-
-        for train_session_idx, test_session_idx in splitter.split(**split_kwargs):
+        for train_session_idx, test_session_idx in folds:
             self._last_split_metadata = _splitter_metadata(splitter) or {}
             self._last_split_metadata.update(
                 {
@@ -1030,6 +1095,22 @@ class CrossDatasetSplitter(BaseCrossValidator):
         return self._last_split_metadata
 
 
+def _stratified_order(y):
+    """Order positions of ``y`` so that every prefix is class-stratified.
+
+    Each sample gets the key ``rank_within_its_class / class_size``; a stable
+    sort on this key places one sample of every class first (all keys 0), then
+    interleaves classes in proportion to their size. Within a class the input
+    order is kept, so the randomness of a shuffled pool is preserved.
+    """
+    y = np.asarray(y)
+    keys = np.empty(len(y), dtype=float)
+    for label in np.unique(y):
+        positions = np.flatnonzero(y == label)
+        keys[positions] = np.arange(len(positions)) / len(positions)
+    return np.argsort(keys, kind="stable")
+
+
 class LearningCurveSplitter(GroupsConsumerMixin, BaseCrossValidator):
     """Learning curve splitter following sklearn CV interface.
 
@@ -1197,7 +1278,11 @@ class LearningCurveSplitter(GroupsConsumerMixin, BaseCrossValidator):
             if np.any(vals < 0) or np.any(vals > 1):
                 raise ValueError("Data subset ratios must be in range [0, 1]")
             upto = np.ceil(vals * len(y)).astype(int)
-            indices = [np.array(range(i)) for i in upto]
+            # Prefixes of a class-interleaved ordering of the (already shuffled)
+            # pool: sizes and nesting are unchanged, but small subsets keep
+            # every class instead of whatever an unstratified prefix holds.
+            order = _stratified_order(y)
+            indices = [order[:i] for i in upto]
         elif self.data_size["policy"] == "per_class":
             classwise_indices = {}
             n_smallest_class = np.inf
@@ -1318,3 +1403,119 @@ class LearningCurveSplitter(GroupsConsumerMixin, BaseCrossValidator):
             Only valid during or after iteration.
         """
         return {"permutation": self._current_perm, "data_size": self._current_data_size}
+
+class PurgedEpochKFold(GroupsConsumerMixin, BaseCrossValidator):
+    """Contiguous within-recording CV without overlapping raw epoch windows.
+
+    Pass groups with three columns: (recording_id, event_sample,
+    epoch_n_samples). Recording IDs must distinguish reused run names across
+    subjects and sessions. Sample starts and lengths must be exact integers;
+    windows are half-open [start, start + length).
+
+    This prevents direct overlap of declared raw epoch extraction windows,
+    *not* leakage through preprocessing of the continuous signal: an IIR
+    filter applied before epoching can couple non-overlapping windows.
+    No automatic paradigm/evaluation integration is performed.
+    """
+
+    def __init__(self, n_splits=5):
+        if isinstance(n_splits, (bool, np.bool_)) or not isinstance(
+            n_splits, (int, np.integer)
+        ) or n_splits < 2:
+            raise ValueError("n_splits must be an integer >= 2.")
+        self.n_splits = int(n_splits)
+
+    def get_n_splits(self, X=None, y=None, groups=None):
+        return self.n_splits
+
+    @staticmethod
+    def _parse_groups(groups, n_samples):
+        if groups is None:
+            raise ValueError("PurgedEpochKFold requires explicit epoch timing groups.")
+        values = np.asarray(groups, dtype=object)
+        if values.shape != (n_samples, 3):
+            raise ValueError(
+                "groups must be an (n_epochs, 3) array of "
+                "(recording_id, event_sample, epoch_n_samples)."
+            )
+        runs = values[:, 0]
+        if any(value is None for value in runs):
+            raise ValueError("recording_id must be present for every epoch.")
+        limits = np.iinfo(np.int64)
+        parsed = []
+        for column in (values[:, 1], values[:, 2]):
+            ints = []
+            for raw in column:
+                if isinstance(raw, (bool, np.bool_)) or not isinstance(
+                    raw, (int, np.integer)
+                ):
+                    raise ValueError("Epoch sample coordinates must be integers.")
+                value = int(raw)
+                if not limits.min <= value <= limits.max:
+                    raise ValueError("Epoch sample coordinate exceeds int64 range.")
+                ints.append(value)
+            parsed.append(np.asarray(ints, dtype=np.int64))
+        starts, lengths = parsed
+        if np.any(lengths <= 0):
+            raise ValueError("epoch_n_samples must be strictly positive.")
+        if np.any(starts > limits.max - lengths):
+            raise ValueError("Epoch interval stop exceeds int64 range.")
+        return runs, starts, lengths
+
+    @staticmethod
+    def _overlap_mask(train_start, train_stop, test_start, test_stop):
+        """Exact half-open intersection in O((N+M) log M), linear memory."""
+        if not len(train_start) or not len(test_start):
+            return np.zeros(len(train_start), dtype=bool)
+        order = np.argsort(test_start, kind="stable")
+        sorted_starts = test_start[order]
+        max_stop = np.maximum.accumulate(test_stop[order])
+        before = np.searchsorted(sorted_starts, train_stop, side="left")
+        overlaps = before > 0
+        overlaps[overlaps] = max_stop[before[overlaps] - 1] > train_start[overlaps]
+        return overlaps
+
+    def split(self, X, y=None, groups=None):
+        n_samples = len(X)
+        if n_samples < self.n_splits:
+            raise ValueError("Not enough epochs for requested folds.")
+        runs, starts, lengths = self._parse_groups(groups, n_samples)
+        y = None if y is None else np.asarray(y)
+        if y is not None and len(y) != n_samples:
+            raise ValueError("y must contain one label per epoch.")
+
+        # Chronological blocks within each recording. No class-balanced DP:
+        # fail closed if a contiguous fold cannot support every class.
+        run_blocks = []
+        for run in dict.fromkeys(runs.tolist()):
+            indices = np.flatnonzero(runs == run)
+            if len(indices) < self.n_splits:
+                raise ValueError("Each recording needs at least n_splits epochs.")
+            chronological = indices[np.lexsort((indices, starts[indices]))]
+            run_blocks.append((run, np.array_split(chronological, self.n_splits)))
+
+        for fold in range(self.n_splits):
+            test = np.sort(np.concatenate([blocks[fold] for _, blocks in run_blocks]))
+            testing = np.zeros(n_samples, dtype=bool)
+            testing[test] = True
+            purged = np.zeros(n_samples, dtype=bool)
+            for run, _ in run_blocks:
+                local_test = test[runs[test] == run]
+                local_train = np.flatnonzero((runs == run) & ~testing)
+                train_start = starts[local_train]
+                test_start = starts[local_test]
+                purged[local_train[self._overlap_mask(
+                    train_start, train_start + lengths[local_train],
+                    test_start, test_start + lengths[local_test],
+                )]] = True
+            train = np.flatnonzero(~testing & ~purged)
+            if not len(train) or not len(test):
+                raise ValueError("Purging removed an entire train or test fold.")
+            if y is not None:
+                required = np.unique(y)
+                if (
+                    len(np.unique(y[train])) != len(required)
+                    or len(np.unique(y[test])) != len(required)
+                ):
+                    raise ValueError("A purged fold lacks a class in train or test.")
+            yield train, test

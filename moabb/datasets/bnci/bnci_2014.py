@@ -435,7 +435,7 @@ class BNCI2014_001(MNEBNCI):
                 "Benjamin Blankertz",
             ],
             institution="Berlin Institute of Technology",
-            country="Germany",
+            country="DE",
             license="CC-BY-ND-4.0",
             repository="BNCI Horizon",
             data_url="http://www.bbci.de/competition/iv/",
@@ -585,12 +585,18 @@ class BNCI2014_002(MNEBNCI):
     were aged between 20 and 30 years, 8 naive to the task, and had no known
     disabilities.
 
+    .. note::
+        The BNCI description above mentions 13 participants, but the BNCI
+        Horizon 2020 release contains 14 subject files (``S01`` to ``S14``),
+        which is what this loader exposes (``n_subjects=14``).
+
     References
     ----------
-    .. [1] Scherer, R., Faller, J., Balderas, D., Friedrich, E. V., &
-           Müller-Putz, G. (2015). Brain-computer interfacing: more than the
-           sum of its parts. Soft Computing, 19(11), 3173-3186.
-           https://doi.org/10.1007/s00500-012-0895-4
+    .. [1] Steyrl, D., Scherer, R., Faller, J., & Müller-Putz, G. R. (2016).
+           Random forests in non-invasive sensorimotor rhythm brain-computer
+           interfaces: a practical and convenient non-linear classifier.
+           Biomedical Engineering / Biomedizinische Technik, 61(1), 77-86.
+           https://doi.org/10.1515/bmt-2014-0117
 
     Notes
     -----
@@ -625,7 +631,7 @@ class BNCI2014_002(MNEBNCI):
             electrode_material="Ag/AgCl",
         ),
         participants=ParticipantMetadata(
-            n_subjects=13,
+            n_subjects=14,
             health_status="healthy",
             age_min=20.0,
             age_max=30.0,
@@ -644,7 +650,7 @@ class BNCI2014_002(MNEBNCI):
             primary_modality="visual",
             synchronicity="synchronous",
             mode="online",
-            events={"right_hand": 769, "feet": 770},
+            events={"right_hand": 1, "feet": 2},
         ),
         documentation=DocumentationMetadata(
             doi="10.1515/bmt-2014-0117",
@@ -656,7 +662,7 @@ class BNCI2014_002(MNEBNCI):
             ],
             institution="Graz University of Technology",
             institution_department="Institute for Knowledge Discovery, Laboratory of Brain-Computer Interfaces",
-            country="Austria",
+            country="AT",
             license="CC-BY-ND-4.0",
             repository="BNCI Horizon",
             publication_year=2014,
@@ -731,7 +737,7 @@ class BNCI2014_002(MNEBNCI):
             code="BNCI2014-002",
             interval=[3, 8],
             paradigm="imagery",
-            doi="10.1007/s00500-012-0895-4",
+            doi="10.1515/bmt-2014-0117",
             selected_subjects=subjects,
             selected_sessions=sessions,
         )
@@ -835,21 +841,7 @@ class BNCI2014_004(MNEBNCI):
         experiment=ExperimentMetadata(
             paradigm="imagery",
             task_type="motor_imagery",
-            events={
-                "276": "Idling EEG (eyes open)",
-                "277": "Idling EEG (eyes closed)",
-                "768": "Start of a trial",
-                "769": "Cue onset left (class 1)",
-                "770": "Cue onset right (class 2)",
-                "781": "BCI feedback (continuous)",
-                "783": "Cue unknown",
-                "1023": "Rejected trial",
-                "1077": "Horizontal eye movement",
-                "1078": "Vertical eye movement",
-                "1079": "Eye rotation",
-                "1081": "Eye blinks",
-                "32766": "Start of a new run",
-            },
+            events={"left_hand": 1, "right_hand": 2},
             n_classes=2,
             class_labels=["left_hand", "right_hand"],
             trials_per_class=None,
@@ -1059,7 +1051,7 @@ class BNCI2014_008(MNEBNCI):
         experiment=ExperimentMetadata(
             paradigm="p300",
             n_classes=2,
-            class_labels=["target", "non-target"],
+            class_labels=["Target", "NonTarget"],
             trial_duration=None,
             study_design="P300 speller with 6x6 matrix for copy-spelling task in ALS patients",
             feedback_type="visual",
@@ -1070,7 +1062,7 @@ class BNCI2014_008(MNEBNCI):
             mode="online",
             has_training_test_split=True,
             instructions="Copy spell seven predefined words of five characters each by focusing attention on desired letters",
-            events={"target": 1, "non-target": 2},
+            events={"Target": 2, "NonTarget": 1},
         ),
         documentation=DocumentationMetadata(
             doi="10.3389/fnhum.2013.00732",
@@ -1085,7 +1077,7 @@ class BNCI2014_008(MNEBNCI):
                 "Febo Cincotti",
             ],
             institution="Fondazione Santa Lucia",
-            country="Italy",
+            country="IT",
             license="CC-BY-NC-ND-4.0",
             repository="BNCI Horizon",
             publication_year=2013,
@@ -1194,15 +1186,20 @@ class BNCI2014_009(MNEBNCI):
 
     - Channels: 16 EEG channels
     - Sampling rate: 256 Hz
-    - Reference: Linked mastoids
+    - Reference: Linked earlobes, ground on the right mastoid
+
+    .. note::
+        The BNCI description of this dataset mentions four recording sessions
+        per subject; the released ``A0XS.mat`` files contain three recordings
+        per subject, which this loader exposes as three sessions.
 
     References
     ----------
-    .. [1] Riccio, A., Simione, L., Schettini, F., Pizzimenti, A., Inghilleri,
-           M., Belardinelli, M. O., & Mattia, D. (2013). Attention and P300-based
-           BCI performance in people with amyotrophic lateral sclerosis. Frontiers
-           in human neuroscience, 7, 732.
-           https://doi.org/10.3389/fnhum.2013.00732
+    .. [1] Aricò, P., Aloise, F., Schettini, F., Salinari, S., Mattia, D., &
+           Cincotti, F. (2014). Influence of P300 latency jitter on event
+           related potential-based brain–computer interface performance.
+           Journal of Neural Engineering, 11(3), 035008.
+           https://doi.org/10.1088/1741-2560/11/3/035008
 
     Notes
     -----
@@ -1255,9 +1252,9 @@ class BNCI2014_009(MNEBNCI):
         experiment=ExperimentMetadata(
             paradigm="p300",
             task_type="spelling",
-            events={"target": 1, "non_target": 5},
+            events={"Target": 2, "NonTarget": 1},
             n_classes=2,
-            class_labels=["target", "non_target"],
+            class_labels=["Target", "NonTarget"],
             trial_duration=16.0,
             study_design="P300-based BCI with two interfaces: P300 Speller (overt attention) and GeoSpell (covert attention). 36 alphanumeric characters presented. Eight stimulation sequences per trial with 16 target intensifications.",
             feedback_type="none",
@@ -1290,7 +1287,7 @@ class BNCI2014_009(MNEBNCI):
                 "F Cincotti",
             ],
             institution="Fondazione Santa Lucia IRCCS",
-            country="Italy",
+            country="IT",
             license="CC-BY-NC-ND-4.0",
             repository="BNCI Horizon",
             publication_year=2014,
@@ -1306,9 +1303,9 @@ class BNCI2014_009(MNEBNCI):
                 "wavelet analysis",
                 "single epoch",
             ],
-            associated_paper_doi="10.3389/fnhum.2013.00732",
+            associated_paper_doi="10.1088/1741-2560/11/3/035008",
         ),
-        sessions_per_subject=4,
+        sessions_per_subject=3,
         runs_per_session=1,
         preprocessing=PreprocessingMetadata(
             data_state="preprocessed",

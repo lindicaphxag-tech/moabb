@@ -168,7 +168,9 @@ _PARTICIPANTS = ParticipantMetadata(
 # Shared acquisition metadata.
 _ACQUISITION = AcquisitionMetadata(
     sampling_rate=1000.0,
-    channel_types={"eeg": 64, "eog": 1},
+    # Paper: "65-channel Quik-cap ... with 62 EEG electrodes positioned
+    # accordingly"; the loader re-types CB1/CB2 as misc (60 EEG at runtime).
+    channel_types={"eeg": 62, "eog": 1},
     montage="standard_1005",
     hardware="Neuroscan Quik-Cap 65-ch, SynAmps2",
     sensor_type="Ag/AgCl",
@@ -216,6 +218,13 @@ def _data_path_for_paradigm(
     path = dl.get_dataset_path(sign, path)
     basepath = Path(path) / "MNE-guttmannflury2025-data"
     subj_dir = basepath / paradigm / f"S{subject:02d}"
+
+    # Some deposits nest the subject once more (``S05/S05/Sess01/...``,
+    # from extracting ``S05.zip`` into ``S05/``); a seeded store then holds
+    # that nested tree instead of the flat one checked below.
+    nested_dir = subj_dir / f"S{subject:02d}"
+    if not force_update and nested_dir.is_dir() and any(nested_dir.rglob("*.bdf")):
+        return str(nested_dir)
 
     # Check if BDF files already exist for this subject.
     n_sess = _SESSIONS_PER_SUBJECT.get(subject, 1)
@@ -507,6 +516,7 @@ class GuttmannFlury2025_MI(BaseDataset):
     """
 
     nemar_id = "nm000265"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=_ACQUISITION,
         participants=_PARTICIPANTS,
@@ -657,6 +667,7 @@ class GuttmannFlury2025_ME(BaseDataset):
 
     METADATA = GuttmannFlury2025_MI.METADATA
     nemar_id = "nm000227"
+    nemar_seed_cache = True
 
     def __init__(self, subjects=None, sessions=None, *, return_all_modalities=False):
         super().__init__(
@@ -726,6 +737,7 @@ class GuttmannFlury2025_SSVEP(BaseDataset):
     """
 
     nemar_id = "nm000310"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=_ACQUISITION,
         participants=_PARTICIPANTS,
@@ -737,7 +749,7 @@ class GuttmannFlury2025_SSVEP(BaseDataset):
             trial_duration=7.0,
             study_design=(
                 "Multi-paradigm BCI (MI/ME/SSVEP/P300). "
-                "SSVEP: 4-class frequency flickering, 48 trials/session, "
+                "SSVEP: 4-class frequency flickering, 40 trials/session, "
                 "up to 3 sessions per subject."
             ),
             feedback_type="none",
@@ -752,10 +764,11 @@ class GuttmannFlury2025_SSVEP(BaseDataset):
         runs_per_session=1,
         tags=Tags(pathology=["Healthy"], modality=["Visual"], type=["Research"]),
         paradigm_specific=ParadigmSpecificMetadata(
-            detected_paradigm="ssvep", stimulus_frequencies_hz=[8.0, 10.0, 12.0, 15.0]
+            detected_paradigm="ssvep", stimulus_frequencies_hz=[10.0, 11.0, 12.0, 13.0]
         ),
         data_structure=DataStructureMetadata(
-            n_trials=3024, trials_context="63 sessions x 48 trials = 3024"
+            n_trials=2520,
+            trials_context="63 sessions x 40 trials = 2520 (paper: 'the other tasks had 40 trials'; 10 per frequency)",
         ),
         bci_application=BCIApplicationMetadata(
             applications=["communication"], environment="laboratory"
@@ -890,6 +903,7 @@ class GuttmannFlury2025_P300(BaseDataset):
     """
 
     nemar_id = "nm000136"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=_ACQUISITION,
         participants=_PARTICIPANTS,

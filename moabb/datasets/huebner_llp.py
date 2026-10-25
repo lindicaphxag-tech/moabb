@@ -117,20 +117,28 @@ class _BaseVisualMatrixSpellerDataset(BaseDataset, ABC):
         self, subject, path=None, force_update=False, update_path=None, verbose=None
     ):
         url = f"{self._src_url}subject{subject:02d}.zip"
-        zipfile_path = Path(
-            dl.data_dl(url, "llp", path=path, force_update=force_update, verbose=verbose)
-        )
-        zipfile_extracted_path = zipfile_path.parent
-
-        subject_dir_path = zipfile_extracted_path / f"subject{subject:02d}"
-
-        if force_update or not subject_dir_path.is_dir():
-            _BaseVisualMatrixSpellerDataset._extract_data(
-                zipfile_extracted_path, zipfile_path
+        subject_dir = f"subject{subject:02d}"
+        # NEMAR deposits keep the extracted subject directory, not the ZIP:
+        # take it from the local store (or a previous extraction) first.
+        zipfile_extracted_path = dl.data_dl_destination(url, "llp", path=path).parent
+        subject_dir_path = zipfile_extracted_path / subject_dir
+        if force_update or not (
+            dl.fill_tree_from_store(zipfile_extracted_path, subject_dir)
+            or any(subject_dir_path.glob("matrixSpeller_Block*_Run*.vhdr"))
+        ):
+            zipfile_path = Path(
+                dl.data_dl(
+                    url, "llp", path=path, force_update=force_update, verbose=verbose
+                )
             )
+            zipfile_extracted_path = zipfile_path.parent
+            subject_dir_path = zipfile_extracted_path / subject_dir
+            if force_update or not subject_dir_path.is_dir():
+                _BaseVisualMatrixSpellerDataset._extract_data(
+                    zipfile_extracted_path, zipfile_path
+                )
 
-        subject_paths = zipfile_extracted_path / f"subject{subject:02d}"
-        subject_paths = subject_paths.glob("matrixSpeller_Block*_Run*.vhdr")
+        subject_paths = subject_dir_path.glob("matrixSpeller_Block*_Run*.vhdr")
         subject_paths = [str(p) for p in subject_paths]
         return sorted(subject_paths)
 
@@ -416,6 +424,11 @@ class Huebner2018(_BaseVisualMatrixSpellerDataset):
     events. The stimulus onset asynchrony (SOA) was 250 ms and the stimulus duration was 100 ms leading to an
     interstimulus interval (ISI) of 150 ms.
 
+    The raw data are hosted on Zenodo (record 5831879, CC BY 4.0). According to the record description, each
+    subject spelled a 35-letter sentence followed by 35-letter free spelling, i.e. Run1-5 were copy-spell and
+    Run6-10 were free spelling, and did this three times (Block1-3); the loader exposes each block as a session
+    with 10 runs.
+
     Parameters
     ----------
     interval: array_like
@@ -521,7 +534,7 @@ class Huebner2018(_BaseVisualMatrixSpellerDataset):
             },
         ),
         documentation=DocumentationMetadata(
-            doi="10.5281/zenodo.192684",
+            doi="10.1109/MCI.2018.2807039",
             repository="Zenodo",
             data_url="https://zenodo.org/record/5831879",
             publication_year=2018,
@@ -561,10 +574,9 @@ class Huebner2018(_BaseVisualMatrixSpellerDataset):
                 "EEG",
             ],
             license="CC-BY-4.0",
-            associated_paper_doi="10.1109/MCI.2018.2807039",
         ),
         sessions_per_subject=3,
-        runs_per_session=None,
+        runs_per_session=10,
         sessions=["0", "1", "2"],
         contributing_labs=None,
         n_contributing_labs=None,

@@ -3,6 +3,7 @@
 #
 # License: BSD (3-clause)
 
+import glob
 import logging
 import os
 
@@ -136,6 +137,7 @@ class Stieger2021(BaseDataset):
     """
 
     nemar_id = "nm000339"
+    nemar_seed_cache = True
     METADATA = DatasetMetadata(
         acquisition=AcquisitionMetadata(
             sampling_rate=1000.0,
@@ -297,7 +299,13 @@ class Stieger2021(BaseDataset):
             imagery_duration_s=6.0,
         ),
         data_structure=DataStructureMetadata(
-            n_trials=450, n_blocks=18, trials_context="per_session"
+            n_trials=450,
+            n_blocks=6,
+            trials_context=(
+                "per session: 2 blocks of each task (LR, UD, 2D), each block "
+                "3 runs of 25 trials (18 runs, 450 trials); released as one "
+                "file per session, exposed as a single run"
+            ),
         ),
         file_format="MAT",
         sessions_per_subject=11,
@@ -387,6 +395,19 @@ class Stieger2021(BaseDataset):
 
         path = get_dataset_path(self.code, path)
         basepath = os.path.join(path, f"MNE-{self.code:s}-data")
+
+        # A seeded NEMAR store (or an earlier load) already holds this
+        # subject's session files; the Figshare file list is only needed
+        # to resolve files that are not on disk yet.
+        if not force_update:
+            local = sorted(
+                f
+                for f in glob.glob(os.path.join(basepath, f"S{subject}_Session_*.mat"))
+                if self.sessions is None
+                or int(os.path.basename(f).split("_")[2].split(".")[0]) in self.sessions
+            )
+            if local:
+                return local
 
         file_list = dl.fs_get_file_list(self.figshare_id)
         hash_file_list = dl.fs_get_file_hash(file_list)
