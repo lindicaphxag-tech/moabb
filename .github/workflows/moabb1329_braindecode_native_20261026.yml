@@ -1,0 +1,42 @@
+name: Fork-only MOABB 1329 Braindecode native gate
+on:
+  push:
+    branches:
+      - ci/moabb1329-braindecode-native-20261026
+  workflow_dispatch:
+permissions:
+  contents: read
+
+env:
+  UV_TORCH_BACKEND: cpu
+
+jobs:
+  braindecode-native:
+    name: Exact-source native Braindecode integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout MOABB PR 1329 source
+        uses: actions/checkout@v4
+      - name: Setup uv on Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Checkout native Braindecode
+        uses: actions/checkout@v4
+        with:
+          repository: braindecode/braindecode
+          path: braindecode
+      - name: Install native CPU-only stacks
+        run: |
+          uv pip install -e .
+          cd braindecode
+          uv pip install -e '.[tests]'
+          uv pip install pytest-xdist
+      - name: Confirm latest production regression
+        run: pytest -q moabb/tests/test_purged_epoch_minimal.py
+      - name: Braindecode full native regression
+        run: |
+          cd braindecode
+          pytest test/ --quiet -n auto
